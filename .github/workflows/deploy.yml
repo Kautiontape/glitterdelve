@@ -1,0 +1,14 @@
+name: Deploy to ktn
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: [self-hosted, ktn]
+    steps:
+      # Static single-page game — no build step. The host nginx serves the directory
+      # directly and terminates TLS, same as the landing page.
+      - name: Deploy
+        run: |
+          cd /opt/services/glitterdelve
+          git pull origin main

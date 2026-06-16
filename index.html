@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glitterdelve</title>
+<meta name="description" content="The gnomes of Glitterdelve cut gems to hold back the dark of the Deepunder. Cut, match, and push the light back into the lost warrens.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0e0b16; --panel:#181226; --ink:#e8e3f5; --muted:#8a82a8; --line:#2a2140;
+    --gold:#c9a227; --light:#fff2a8;
+    --r1:#e0496b; --r2:#3fb6d3; --r5:#9b6cf0; --r6:#ec6fb0;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,'Times New Roman',serif;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  body{
+    background:
+      radial-gradient(1100px 700px at 70% -10%,#1c1430 0%,transparent 60%),
+      radial-gradient(900px 600px at 10% 110%,#170f28 0%,transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--serif);
+    line-height:1.7;
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:720px;margin:0 auto;padding:4rem 1.5rem 5rem;}
+
+  /* ---- header ---- */
+  header{margin-bottom:2.75rem;}
+  .eyebrow{
+    font-family:var(--mono);font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:1rem;display:flex;align-items:center;gap:.6rem;
+  }
+  .eyebrow .gem{width:14px;height:14px;display:inline-block;}
+  h1{
+    font-family:var(--mono);font-weight:700;letter-spacing:-.01em;
+    font-size:clamp(2.1rem,7vw,3.2rem);line-height:1.05;color:var(--ink);
+    margin-bottom:.5rem;
+  }
+  h1 .glow{color:var(--light);text-shadow:0 0 26px rgba(255,242,168,.45);}
+  .sub{font-family:var(--mono);font-size:.82rem;color:var(--muted);letter-spacing:.02em;}
+
+  /* ---- lore ---- */
+  .lore{margin:2.5rem 0;}
+  .lore p{font-size:1.12rem;color:#d8d2ec;margin-bottom:1.25rem;}
+  .lore p:last-child{margin-bottom:0;}
+  .lore .drop::first-letter{
+    font-size:3.4rem;line-height:.8;float:left;padding:.35rem .55rem 0 0;
+    color:var(--gold);font-weight:700;
+  }
+
+  /* ---- play section ---- */
+  .play{margin:3rem 0 2.25rem;}
+  .play-head{
+    display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+    margin-bottom:.9rem;flex-wrap:wrap;
+  }
+  .play-head h2{
+    font-family:var(--mono);font-size:.72rem;font-weight:500;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .fs-link{
+    font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;color:var(--gold);
+    text-decoration:none;border-bottom:1px solid transparent;transition:.15s;
+  }
+  .fs-link:hover{border-bottom-color:var(--gold);}
+
+  .frame{
+    position:relative;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+    background:#0b0813;box-shadow:0 24px 60px -28px rgba(0,0,0,.9), inset 0 0 60px rgba(255,242,168,.03);
+  }
+  .frame iframe{display:block;width:100%;height:min(78vh,760px);border:0;background:var(--bg);}
+
+  /* mobile: the canvas captures touch, so don't trap scroll — offer a fullscreen play card instead */
+  .tap{
+    display:none;text-decoration:none;color:var(--ink);
+    border:1px solid var(--line);border-radius:16px;background:#0b0813;
+    padding:2.2rem 1.5rem;text-align:center;
+    box-shadow:0 24px 60px -28px rgba(0,0,0,.9);
+  }
+  .tap .play-icon{
+    width:58px;height:58px;margin:0 auto .9rem;border-radius:50%;
+    display:grid;place-items:center;background:var(--gold);color:#1a1206;font-size:1.4rem;
+    box-shadow:0 0 28px rgba(201,162,39,.5);
+  }
+  .tap .tap-title{font-family:var(--mono);font-size:1rem;font-weight:700;letter-spacing:.02em;}
+  .tap .tap-note{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-top:.4rem;}
+
+  @media (max-width:720px){
+    .frame{display:none;}
+    .tap{display:block;}
+    .wrap{padding:2.75rem 1.15rem 4rem;}
+    .lore p{font-size:1.05rem;}
+  }
+
+  /* ---- details / rules ---- */
+  .guide{margin-top:1rem;}
+  details{
+    border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--panel) 70%,transparent);
+    margin-bottom:.75rem;overflow:hidden;
+  }
+  summary{
+    list-style:none;cursor:pointer;padding:.95rem 1.1rem;
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink);
+    display:flex;align-items:center;gap:.7rem;user-select:none;
+  }
+  summary::-webkit-details-marker{display:none;}
+  summary .chev{color:var(--gold);transition:transform .2s;font-size:.7rem;}
+  details[open] summary .chev{transform:rotate(90deg);}
+  details[open] summary{border-bottom:1px solid var(--line);}
+  .det-body{padding:1.1rem 1.2rem 1.3rem;}
+  .det-body p{font-size:1.02rem;color:#d4cee8;margin-bottom:.85rem;}
+  .det-body p:last-child{margin-bottom:0;}
+  .det-body strong{color:var(--ink);font-weight:600;}
+
+  .tools{list-style:none;display:flex;flex-direction:column;gap:.85rem;}
+  .tools li{display:flex;gap:.85rem;align-items:flex-start;}
+  .tools .name{
+    font-family:var(--mono);font-size:.82rem;letter-spacing:.02em;font-weight:700;
+    min-width:64px;padding-top:.12rem;
+  }
+  .tools .desc{font-size:1.0rem;color:#d4cee8;line-height:1.6;}
+  .n-cut{color:#cbb6ff;} .n-wall{color:var(--gold);} .n-sort{color:#5fe0d0;}
+  .n-fork{color:#ff8a4c;} .n-lens{color:#ffe14d;}
+
+  /* ---- footer ---- */
+  footer{
+    margin-top:3.5rem;padding-top:1.5rem;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center;gap:.75rem;flex-wrap:wrap;
+    font-family:var(--mono);font-size:.7rem;color:var(--muted);
+  }
+  footer a{color:var(--gold);text-decoration:none;}
+  footer a:hover{text-decoration:underline;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">
+        <svg class="gem" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 4 L26 13 L16 28 L6 13 Z" fill="#9b6cf0" stroke="#ffe14d" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        kautiontape · the deepunder
+      </div>
+      <h1>Glitter<span class="glow">delve</span></h1>
+      <p class="sub">cut gems · hold the light · keep the dark out</p>
+    </header>
+
+    <section class="lore" aria-label="Story">
+      <p class="drop">Deep beneath the world is a dark the gnomes call the Deepunder. The gnomes of Glitterdelve live down in it &mdash; the last warren of them, as far as any of them know. There is only one way to survive this far down, and that is by light.</p>
+      <p>The dark isn't empty. Something old waits in it, and it keeps whatever the light can't reach.</p>
+      <p>So the gnomes cut gems. Gems hold light, and light holds back the dark. From the great heart-shaft at the center &mdash; the one fire that has never gone out &mdash; they push the glow outward into the lost warrens and down into the Deepunder, taking back an inch at a time what the dark has held for an age.</p>
+      <p>But the dark is patient, and it is always pulling. Whatever slips past the edge of the light is not dropped. It is taken.</p>
+    </section>
+
+    <section class="play" aria-label="Play">
+      <div class="play-head">
+        <h2>The delve</h2>
+        <a class="fs-link" href="demo.html" target="_blank" rel="noopener">Open fullscreen &#8599;</a>
+      </div>
+
+      <!-- Desktop: the game, embedded -->
+      <div class="frame">
+        <iframe src="demo.html" title="Glitterdelve — play" loading="lazy"></iframe>
+      </div>
+
+      <!-- Mobile: tap to play fullscreen (the canvas would otherwise trap your scroll) -->
+      <a class="tap" href="demo.html">
+        <span class="play-icon">&#9654;</span>
+        <span class="tap-title">Enter the delve</span>
+        <span class="tap-note">opens fullscreen — best played on the largest screen you've got</span>
+      </a>
+    </section>
+
+    <div class="guide">
+      <details>
+        <summary><span class="chev">&#9656;</span> How to play</summary>
+        <div class="det-body">
+          <p><strong>Cut a match.</strong> With the Cut tool, tap a gem and then a gem next to it to swap the two, or drag one onto its neighbor. The swap only holds if it lines up three or more of the same color. Line them up and the gems are cut. That is your work, and your score.</p>
+          <p><strong>The heart-shaft.</strong> The middle column is the one light that never goes out. It feeds itself a gem every beat, and any gem that reaches the bottom of it is collected. That is where the light comes home.</p>
+          <p><strong>Race the fall.</strong> Every other lit column only reaches so far down. A gem that falls below the light dims for a moment, then it is gone &mdash; lost to the dark, and the dark does not give it back. Gravity is always trying to drain your gems past the edge. Matching is how you beat it there.</p>
+          <p><strong>Push the light outward.</strong> Cut a match in a lit column and the light claims the next warren over and keeps it. Reclaim them one at a time until the whole delve is lit again. The count top-right tracks how many warrens are lit, and how many gems the dark has taken.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary><span class="chev">&#9656;</span> The tools</summary>
+        <div class="det-body">
+          <ul class="tools">
+            <li><span class="name n-cut">Cut</span><span class="desc">Swap two neighboring gems to make a match. This is your hands, and the only tool you start with selected.</span></li>
+            <li><span class="name n-wall">Wall</span><span class="desc">Lay a bar across a seam. Gems pile up on top of it and cannot fall through, so you can hold a column steady.</span></li>
+            <li><span class="name n-sort">Sorter</span><span class="desc">Clamp a vertical seam. Every beat it swaps the two gems across it, but only when that swap makes a match. A cutter that runs without you.</span></li>
+            <li><span class="name n-fork">Fork</span><span class="desc">Drop it in a cell and drag left or right to aim it. It shoves every other falling gem that way, carrying gems sideways from one column into another.</span></li>
+            <li><span class="name n-lens">Lens</span><span class="desc">Like a Wall it stops gems falling past it, and it also carries the light deeper down the shaft. It only catches the light if you place it inside a column that is already lit.</span></li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <footer>
+      <span>a kautiontape thing, made underground</span>
+      <a href="https://kautiontape.com">kautiontape.com</a>
+    </footer>
+  </div>
+</body>
+</html>

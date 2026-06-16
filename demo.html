@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Glitterdelve</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+  :root{
+    --bg:#0e0b16; --panel:#181226; --ink:#e8e3f5; --muted:#8a82a8; --line:#2a2140; --accent:#c9a227;
+    --r1:#e0496b; --r2:#3fb6d3; --r3:#5dd36a; --r4:#f2b134; --r5:#9b6cf0; --r6:#ec6fb0;
+    --dam:#c9a227; --swap:#5fe0d0; --split:#ff8a4c; --amp:#ffe14d; --light:#fff2a8;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:none;}
+  #stage{position:absolute;inset:0;
+    background:radial-gradient(1100px 700px at 70% -10%,#1c1430 0%,transparent 60%),var(--bg);}
+  canvas{display:block;width:100%;height:100%;}
+  .topbar{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none;}
+  .card{background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);
+    border-radius:14px;padding:10px 14px;backdrop-filter:blur(8px);}
+  .total{font-size:22px;font-weight:700;letter-spacing:-.02em;}
+  .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+  .stat{margin-left:auto;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .stat b{color:var(--ink);font-weight:600;}
+  .toolbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
+    background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);
+    border-radius:16px;padding:8px;backdrop-filter:blur(8px);}
+  .tool{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:74px;
+    padding:8px 10px;border-radius:11px;border:1px solid transparent;cursor:pointer;
+    color:var(--muted);font-size:11px;transition:.15s;}
+  .tool:hover{color:var(--ink);background:#ffffff0d;}
+  .tool.active{color:var(--ink);border-color:currentColor;background:#ffffff14;}
+  .tool .ic{font-size:18px;line-height:1;}
+  .tool.t-move.active{color:#cbb6ff;}
+  .tool.t-dam.active{color:var(--dam);}
+  .tool.t-swap.active{color:var(--swap);}
+  .tool.t-split.active{color:var(--split);}
+  .tool.t-amp.active{color:var(--amp);}
+  .hint{position:absolute;bottom:84px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted);
+    text-align:center;pointer-events:none;background:color-mix(in srgb,var(--panel) 80%,transparent);
+    border:1px solid var(--line);border-radius:10px;padding:7px 13px;transition:opacity .5s;max-width:90vw;}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div class="topbar">
+  <div class="card">
+    <div class="total" id="total">0</div>
+    <div class="label">gems cut</div>
+  </div>
+  <div class="card stat">
+    walls <b id="ndam">0</b> · sorters <b id="nswap">0</b> · forks <b id="nsplit">0</b> · lenses <b id="namp">0</b><br>
+    warrens lit <b id="dstate">3 / 9</b> · lost to the dark <b id="nlost">0</b>
+  </div>
+</div>
+
+<div class="hint" id="hint">Gems falling past the light dim and are lost to the dark — match them in time · The heart-shaft (center) never goes dark · Match outward to light new warrens · A lens carries the light deeper down a shaft</div>
+
+<div class="toolbar" id="toolbar">
+  <div class="tool t-move active" data-tool="move"><span class="ic">✥</span>Cut</div>
+  <div class="tool t-dam"  data-tool="dam"><span class="ic">▬</span>Wall</div>
+  <div class="tool t-swap" data-tool="swap"><span class="ic">⇄</span>Sorter</div>
+  <div class="tool t-split" data-tool="split"><span class="ic">⋔</span>Fork</div>
+  <div class="tool t-amp" data-tool="amp"><span class="ic">≣</span>Lens</div>
+</div>
+
+<script>
+/* =====================================================================
+   LATTICE PROTOTYPE
+   - Gravity is DOWN. Gems emit from a solid dropper at the ceiling.
+   - The board CELLS hold gems. The player builds on the LATTICE:
+       * DAM    = barrier welded on a HORIZONTAL seam (between row y-1 and y
+                  at column x). Gems pile ON TOP, cannot fall through.
+       * SWAPPER= clamp welded on a VERTICAL seam (between col x-1 and x at
+                  row y). Each tick it swaps those two gems IF the swap makes
+                  a match (prefers bigger). The automated player, on an edge.
+   - Placement: choose a tool -> grid CORNERS glow -> drag corner→corner.
+       Horizontal drag => dam on that seam.  Vertical drag => swapper.
+   - Single fixed-width column field for now (no panning) to focus on FEEL.
+   ===================================================================== */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d'), stage=document.getElementById('stage');
+const COLORS=['--r1','--r2','--r3','--r4','--r5','--r6']
+  .map(v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+const DAMC=getComputedStyle(document.documentElement).getPropertyValue('--dam').trim();
+const SWAPC=getComputedStyle(document.documentElement).getPropertyValue('--swap').trim();
+const SPLITC=getComputedStyle(document.documentElement).getPropertyValue('--split').trim();
+const AMPC=getComputedStyle(document.documentElement).getPropertyValue('--amp').trim();
+const LIGHTC=getComputedStyle(document.documentElement).getPropertyValue('--light').trim();
+const NCOL=COLORS.length;
+
+/* ---- board dims ---- */
+const COLS=9, ROWS=14;            // visible play field
+let CELL=56, OX=0, OY=0;          // cell size + origin offset (centered)
+const EMPTY=-1;
+/* grid[y][x] color or EMPTY. y=0 is just under the ceiling. */
+let grid=[];
+for(let y=0;y<ROWS;y++){ grid.push(new Array(COLS).fill(EMPTY)); }
+
+/* ---- lattice structures ----
+   dams:    Set of "x,y" meaning a barrier on the seam ABOVE cell (x,y)
+            i.e. between cell (x,y-1) and (x,y). Gems cannot cross downward.
+   swappers:Set of "x,y" meaning a clamp on the seam LEFT of cell (x,y)
+            i.e. between (x-1,y) and (x,y). */
+const dams=new Set();
+const swappers=new Set();
+/* splitters: Map "x,y" -> {dir:+1|-1, flip:false}. Lives on the vertical seam
+   to the LEFT of cell (x,y). A gem about to fall INTO column (x or x-1, the
+   side the splitter pushes toward) alternates: pass straight / shove sideways.
+   We anchor the splitter to a COLUMN: it intercepts gems falling through its
+   own cell (x) and every other one gets nudged to x-1 (or x+1). */
+const splitters=new Map();
+/* amplifiers: Set "x,y" = a lattice piece on the HORIZONTAL seam above cell
+   (x,y) (same seam type as a dam). It BLOCKS downward fall like a dam, AND
+   relays the column's light +AMP_REACH cells deeper. Must sit inside the
+   currently-lit zone to catch the light (no leapfrogging into the dark). */
+const amplifiers=new Set();
+const AMP_REACH=4;                  // cells of light an amplifier relays downward
+
+/* ---- DROPPERS & IGNITION (latch + match-driven supply) ----
+   ANCHOR plus its immediate neighbours (ANCHOR±1) start LIT and seeded.
+   The ANCHOR is the only column that spawns FREELY every tick (the heartbeat).
+   Every other lit column receives gems ONLY as match payout — match N gems in
+   it and N gems drop back into its top. Stop matching there and it goes still.
+   Outward expansion latches PERMANENTLY: a match in a lit column claims the
+   neighbour further from centre (seeded with a few gems so it's playable). */
+const BASE_REACH=4;                 // base cells of light a lit column projects
+const ANCHOR=4;                     // center column: always-on infinite base
+const litCols=new Array(COLS).fill(false);
+litCols[ANCHOR]=true;
+if(ANCHOR-1>=0) litCols[ANCHOR-1]=true;
+if(ANCHOR+1<COLS) litCols[ANCHOR+1]=true;
+function isCharged(x){ return x>=0 && x<COLS && litCols[x]; }
+function ignite(x){ if(x<0||x>=COLS) return;
+  if(!litCols[x]){ litCols[x]=true; newlyLit.push({x,t:performance.now()});
+    refill(x, 3); } }   // seed a freshly-claimed column so it's immediately playable
+
+/* ---- score ---- */
+let collected=0;
+
+/* ---- timing ---- */
+let TICK=260;                     // ms per simulation tick (speed lives here)
+let acc=0, last=performance.now();
+
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  cv.width=innerWidth*dpr|0; cv.height=innerHeight*dpr|0; ctx.setTransform(dpr,0,0,dpr,0,0);
+  const availW=innerWidth-40, availH=innerHeight-170;
+  CELL=Math.max(34,Math.min(availW/COLS, availH/ROWS));
+  OX=(innerWidth-CELL*COLS)/2;
+  OY=Math.max(70,(innerHeight-CELL*ROWS)/2 - 10);
+}
+addEventListener('resize',resize);
+
+/* ---- coordinate helpers ---- */
+const cellX=x=>OX+x*CELL, cellY=y=>OY+y*CELL;
+function pixelToCell(px,py){ return {x:Math.floor((px-OX)/CELL), y:Math.floor((py-OY)/CELL)}; }
+function pixelToCorner(px,py){ // nearest grid corner (0..COLS, 0..ROWS)
+  return {cx:Math.round((px-OX)/CELL), cy:Math.round((py-OY)/CELL)};
+}
+const inBounds=(x,y)=>x>=0&&x<COLS&&y>=0&&y<ROWS;
+
+/* ---- LIGHT ----
+   A column's light depth: the ANCHOR is infinite. A CHARGED non-anchor column
+   reaches BASE_REACH, extended by any amplifier seam inside its lit span. A
+   discharged (dark) column has no light. Returns {depth, ampSeams}; depth=-1 if dark. */
+function lightReach(cx){
+  if(cx<0||cx>=COLS||!isCharged(cx)) return { depth:-1, ampSeams:[] };
+  if(cx===ANCHOR) return { depth: ROWS-1, ampSeams: collectAmpSeams(cx, ROWS-1) };
+  let depth = BASE_REACH-1;
+  const ampSeams=[];
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(let y=1;y<=Math.min(depth+1, ROWS-1);y++){
+      if(amplifiers.has(cx+','+y) && (y-1)<=depth){
+        const nd=Math.min(ROWS-1, y-1+AMP_REACH);
+        if(nd>depth){ depth=nd; changed=true; }
+        if(!ampSeams.includes(y)) ampSeams.push(y);
+      }
+    }
+  }
+  return { depth: Math.min(depth, ROWS-1), ampSeams };
+}
+function collectAmpSeams(cx, maxDepth){
+  const s=[]; for(let y=1;y<=maxDepth;y++) if(amplifiers.has(cx+','+y)) s.push(y); return s;
+}
+function isLit(x,y){
+  if(x<0||x>=COLS||!isCharged(x)) return false;
+  const {depth}=lightReach(x);
+  return y<=depth;
+}
+
+/* ====================  SIMULATION  ==================== */
+/* gravity, per tick, processed bottom-up. Straight fall only (no sand tumble):
+   a gem falls one cell if the seam below isn't blocked (dam/amp) and the cell
+   below is empty. A SPLITTER diverts every other gem sideways. Lateral motion
+   comes ONLY from splitters/swaps — never from gravity itself.
+   THE LIGHT BOUNDARY IS A THRESHOLD OF LOSS, not a floor: a gem that falls
+   BELOW its column's lit depth doesn't rest there — it enters a one-tick FADING
+   state (translucent), then vanishes (lost to the dark). Gravity is always
+   trying to drain your gems past the light; matching races it. The anchor's
+   infinite light means nothing is ever lost there. */
+function canRest(x,y){ return inBounds(x,y) && grid[y][x]===EMPTY; }
+function blockedBelow(x,y){ return dams.has(x+','+(y+1)) || amplifiers.has(x+','+(y+1)); }
+
+/* fading[x,y] = tick timestamp a gem began fading at (x,y). It's rendered
+   translucent this tick and removed next. */
+const fading=new Map();
+let lostToDark=0;
+
+function stepGravity(){
+  // first, resolve anything that was fading last tick -> it's now lost
+  for(const key of [...fading.keys()]){
+    const [x,y]=key.split(',').map(Number);
+    if(grid[y][x]!==EMPTY){ grid[y][x]=EMPTY; lostToDark++; }
+    fading.delete(key);
+  }
+
+  for(let y=ROWS-2;y>=0;y--){
+    for(let x=0;x<COLS;x++){
+      const c=grid[y][x];
+      if(c===EMPTY) continue;
+      if(blockedBelow(x,y)) continue;            // dam/amp holds it in place
+      const below=y+1;
+      const litDepth=lightReach(x).depth;        // -1 if dark, ROWS-1 if anchor
+      if(below>litDepth){
+        if(!fading.has(x+','+y)) fading.set(x+','+y, performance.now());
+        continue;
+      }
+      const sp=splitterOnColumn(x,y);
+      if(sp && sp.flip){
+        const tx=x+sp.dir;
+        if(tx>=0&&tx<COLS && below<=lightReach(tx).depth && canRest(tx,below)){
+          grid[below][tx]=c; grid[y][x]=EMPTY; sp.flip=!sp.flip; continue;
+        }
+      }
+      if(canRest(x,below)){
+        grid[below][x]=c; grid[y][x]=EMPTY; if(sp) sp.flip=!sp.flip;
+      }
+    }
+  }
+  // anchor floor: gems resting on the true bottom of the infinite column are
+  // COLLECTED (scored), not lost — the anchor is the safe harvest column.
+  if(grid[ROWS-1][ANCHOR]!==EMPTY){ collected++; grid[ROWS-1][ANCHOR]=EMPTY; }
+}
+
+/* choose a spawn color for cell (x,y) that does NOT complete a 3-run with the
+   two gems already below it in-column or the two beside it horizontally. This
+   guarantees the dropper never hands the player a free match — every match must
+   be earned by a swap/route. Falls back to any color if all would collide. */
+function spawnColor(x,y){
+  const bad=new Set();
+  if(inBounds(x,y+1)&&inBounds(x,y+2)&&grid[y+1][x]!==EMPTY&&grid[y+1][x]===grid[y+2][x])
+    bad.add(grid[y+1][x]);
+  const L1=inBounds(x-1,y)?grid[y][x-1]:EMPTY, L2=inBounds(x-2,y)?grid[y][x-2]:EMPTY;
+  const R1=inBounds(x+1,y)?grid[y][x+1]:EMPTY, R2=inBounds(x+2,y)?grid[y][x+2]:EMPTY;
+  if(L1!==EMPTY&&L1===L2) bad.add(L1);
+  if(R1!==EMPTY&&R1===R2) bad.add(R1);
+  if(L1!==EMPTY&&L1===R1) bad.add(L1);
+  const choices=[]; for(let c=0;c<NCOL;c++) if(!bad.has(c)) choices.push(c);
+  const pool=choices.length?choices:[...Array(NCOL).keys()];
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+/* find a splitter that governs the falling stream in column x at row y.
+   We store splitters keyed by the cell they sit in; a splitter at (sx,sy)
+   intercepts gems passing through column sx at row sy. */
+function splitterOnColumn(x,y){
+  const s=splitters.get(x+','+y);
+  return s||null;
+}
+
+/* spawn: ONLY the anchor spawns freely every tick — the heartbeat that gives
+   you a perpetual seed to work from. Every other lit column receives gems ONLY
+   as the payout of a match (see resolveBoard). Stop matching in a column and it
+   stops receiving gems — no flood, the outer board goes still and drains. */
+function stepSpawn(){
+  if(grid[0][ANCHOR]===EMPTY) grid[0][ANCHOR]=spawnColor(0,ANCHOR);
+}
+
+/* auto-swappers: each tick, across its vertical seam between (x-1,y) and (x,y),
+   swap the two gems ONLY if both sides hold gems AND the swap creates a match.
+   Pure harvester — lateral transport is the splitter's job now, not this. */
+function stepSwappers(){
+  for(const key of swappers){
+    const [x,y]=key.split(',').map(Number);   // seam between (x-1,y) and (x,y)
+    const ax=x-1, ay=y, bx=x, by=y;
+    if(!inBounds(ax,ay)||!inBounds(bx,by)) continue;
+    const a=grid[ay][ax], b=grid[by][bx];
+    if(a===EMPTY || b===EMPTY || a===b) continue;   // need two different gems
+    grid[ay][ax]=b; grid[by][bx]=a;                 // try the swap
+    if(matchesAt(ax,ay).size>0 || matchesAt(bx,by).size>0){
+      // keep it; resolveBoard() will clear the match
+    } else { grid[ay][ax]=a; grid[by][bx]=b; }       // revert (no match)
+  }
+}
+
+/* match detection around a single cell */
+function matchesAt(x,y){
+  const set=new Set(); const c=grid[y][x]; if(c===EMPTY) return set;
+  // horizontal run through (x,y)
+  let xs=x; while(xs-1>=0 && grid[y][xs-1]===c) xs--;
+  let xe=x; while(xe+1<COLS && grid[y][xe+1]===c) xe++;
+  if(xe-xs+1>=3) for(let i=xs;i<=xe;i++) set.add(i+','+y);
+  // vertical run through (x,y)
+  let ys=y; while(ys-1>=0 && grid[ys-1][x]===c) ys--;
+  let ye=y; while(ye+1<ROWS && grid[ye+1][x]===c) ye++;
+  if(ye-ys+1>=3) for(let j=ys;j<=ye;j++) set.add(x+','+j);
+  return set;
+}
+function allMatches(){
+  const set=new Set();
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+    if(grid[y][x]===EMPTY) continue;
+    for(const k of matchesAt(x,y)) set.add(k);
+  }
+  return set;
+}
+
+/* resolve standing matches. A matched cell that is LIT captures energy (scores)
+   and IGNITES the horizontal neighbours of its column (±1) — they latch on
+   permanently, gaining light + a dropper. Spreading activation outward. Matches
+   in the dark still clear (hygiene) but capture nothing and ignite nothing. */
+const popping=new Map();
+const poppingLit=new Map();
+const denials=[];
+function flashDenied(x,y){ denials.push({x,y,t:performance.now()}); }
+
+function resolveBoard(){
+  const m=allMatches();
+  if(m.size===0) return false;
+  const perCol=new Map();   // column -> count of lit cells matched there
+  for(const k of m){ const [x,y]=k.split(',').map(Number);
+    const wasLit=isLit(x,y);
+    if(wasLit){ collected++; perCol.set(x,(perCol.get(x)||0)+1); }
+    poppingLit.set(k, wasLit);
+    popping.set(k, performance.now());
+    grid[y][x]=EMPTY;
+  }
+  for(const [x,n] of perCol){
+    // MATCH-DRIVEN SPAWN: drop the matched count back into this column's top
+    // (skip the anchor — it has its own free heartbeat and would double-feed).
+    if(x!==ANCHOR) refill(x, n);
+    // outward latch: a lit match permanently claims the neighbour further from centre
+    if(x===ANCHOR){ ignite(x-1); ignite(x+1); }
+    else if(x<ANCHOR) ignite(x-1);
+    else ignite(x+1);
+  }
+  return true;
+}
+/* drop up to n gems into the top empty cells of column x (match payout) */
+function refill(x, n){
+  let placed=0;
+  for(let y=0;y<ROWS && placed<n;y++){
+    if(grid[y][x]===EMPTY){ grid[y][x]=spawnColor(x,y); placed++; }
+    else break;   // only stack onto the top run of empties
+  }
+}
+const newlyLit=[];   // for a brief ignition flash
+
+/* one simulation tick */
+function tick(){
+  stepSwappers();      // machines act
+  resolveBoard();      // clear + capture; lit matches latch on the outward column
+  stepGravity();       // everything falls one step
+  stepSpawn();         // every lit column tops up
+  resolveBoard();      // settling can create new matches
+  updateStats();
+}
+
+/* ====================  PLAYER SWAP (manual)  ==================== */
+let sel=null;
+function tryPlayerSwap(a,b){
+  if(Math.abs(a.x-b.x)+Math.abs(a.y-b.y)!==1) return;
+  if(!inBounds(a.x,a.y)||!inBounds(b.x,b.y)) return;
+  const va=grid[a.y][a.x], vb=grid[b.y][b.x];
+  if(va===EMPTY||vb===EMPTY) return;
+  grid[a.y][a.x]=vb; grid[b.y][b.x]=va;
+  if(matchesAt(a.x,a.y).size>0||matchesAt(b.x,b.y).size>0){
+    resolveBoard();
+  } else { grid[a.y][a.x]=va; grid[b.y][b.x]=vb; }  // revert: no match
+}
+
+/* ====================  INPUT  ==================== */
+let tool='move';
+let drag=null;   // {fromCorner:{cx,cy}, px,py} during a placement drag
+document.getElementById('toolbar').addEventListener('click',e=>{
+  const t=e.target.closest('.tool'); if(!t) return;
+  tool=t.dataset.tool; sel=null;
+  document.querySelectorAll('.tool').forEach(el=>el.classList.toggle('active',el===t));
+  fadeHint();
+});
+
+stage.addEventListener('contextmenu',e=>e.preventDefault());   // right-click is not a game action
+stage.addEventListener('pointerdown',e=>{
+  if(e.button>0) return;                 // primary button / touch / pen only — ignore right & middle
+  stage.setPointerCapture(e.pointerId);
+  if(tool==='move'){
+    const c=pixelToCell(e.clientX,e.clientY);
+    if(inBounds(c.x,c.y)){
+      if(sel && Math.abs(sel.x-c.x)+Math.abs(sel.y-c.y)===1){ tryPlayerSwap(sel,c); sel=null; }
+      else sel=c;
+    }
+    drag={mode:'swapdrag', from:c, px:e.clientX, py:e.clientY};
+  } else if(tool==='split'){
+    // splitter sits IN a cell; drag left/right from it to choose push direction
+    const c=pixelToCell(e.clientX,e.clientY);
+    drag={mode:'split', from:c, sx:e.clientX, px:e.clientX, py:e.clientY};
+  } else {
+    const corner=pixelToCorner(e.clientX,e.clientY);
+    drag={mode:'place', fromCorner:corner, px:e.clientX, py:e.clientY};
+  }
+});
+stage.addEventListener('pointermove',e=>{ if(!drag) return; drag.px=e.clientX; drag.py=e.clientY;
+  if(drag.mode==='swapdrag' && sel){
+    const c=pixelToCell(e.clientX,e.clientY);
+    if(inBounds(c.x,c.y) && Math.abs(sel.x-c.x)+Math.abs(sel.y-c.y)===1){
+      tryPlayerSwap(sel,c); sel=null; drag=null;
+    }
+  }
+});
+stage.addEventListener('pointerup',e=>{
+  if(drag && drag.mode==='place'){
+    const a=drag.fromCorner, b=pixelToCorner(e.clientX,e.clientY);
+    placeFromCorners(a,b);
+  } else if(drag && drag.mode==='split'){
+    const c=drag.from;
+    if(inBounds(c.x,c.y)){
+      const dir = (e.clientX - drag.sx) < 0 ? -1 : +1;   // drag left = push left
+      const key=c.x+','+c.y;
+      const ex=splitters.get(key);
+      if(ex && ex.dir===dir) splitters.delete(key);      // same dir again => remove
+      else splitters.set(key,{dir, flip:false});
+      updateStats();
+    }
+  }
+  drag=null; fadeHint();
+});
+
+/* turn a corner→corner drag into a dam or swapper on the right seam */
+function placeFromCorners(a,b){
+  const dx=b.cx-a.cx, dy=b.cy-a.cy;
+  if(Math.abs(dx)+Math.abs(dy)!==1) return;       // must be one segment
+  if(tool==='dam' && Math.abs(dx)===1){
+    // horizontal segment from corner (minX, cy) -> seam above cell (cellX, cy)
+    const minX=Math.min(a.cx,b.cx);
+    const cx=minX, cy=a.cy;                        // seam between row cy-1 and cy
+    if(cx>=0&&cx<COLS&&cy>=1&&cy<ROWS){
+      const key=cx+','+cy; dams.has(key)?dams.delete(key):dams.add(key);
+    }
+  } else if(tool==='swap' && Math.abs(dy)===1){
+    // vertical segment => seam left of cell (a.cx, minY)
+    const minY=Math.min(a.cy,b.cy);
+    const cx=a.cx, cy=minY;                        // seam between col cx-1 and cx
+    if(cx>=1&&cx<COLS&&cy>=0&&cy<ROWS){
+      const key=cx+','+cy; swappers.has(key)?swappers.delete(key):swappers.add(key);
+    }
+  } else if(tool==='amp' && Math.abs(dx)===1){
+    // horizontal segment, same seam geometry as a dam
+    const minX=Math.min(a.cx,b.cx);
+    const cx=minX, cy=a.cy;                        // seam above cell (cx,cy)
+    if(cx>=0&&cx<COLS&&cy>=1&&cy<ROWS){
+      const key=cx+','+cy;
+      if(amplifiers.has(key)){ amplifiers.delete(key); }
+      else {
+        // Amp is infrastructure: valid if the seam sits within the column's
+        // POTENTIAL reach (ignoring transient flicker). It relays light only
+        // while the column is actually charged. Use potentialReach() so you can
+        // build amps on a flickering column without timing the placement.
+        if((cy-1) <= potentialReach(cx)) amplifiers.add(key);
+        else flashDenied(cx,cy);
+      }
+    }
+  }
+  updateStats();
+}
+/* the deepest row a column COULD light if charged, including amp relays —
+   independent of current flicker state. Anchor = floor. */
+function potentialReach(cx){
+  if(cx===ANCHOR) return ROWS-1;
+  let depth=BASE_REACH-1, changed=true;
+  while(changed){ changed=false;
+    for(let y=1;y<=Math.min(depth+1,ROWS-1);y++){
+      if(amplifiers.has(cx+','+y) && (y-1)<=depth){
+        const nd=Math.min(ROWS-1,y-1+AMP_REACH);
+        if(nd>depth){ depth=nd; changed=true; }
+      }
+    }
+  }
+  return Math.min(depth,ROWS-1);
+}
+
+/* ====================  RENDER  ==================== */
+function draw(){
+  ctx.clearRect(0,0,innerWidth,innerHeight);
+
+  // play-field frame
+  ctx.fillStyle='#00000035';
+  ctx.fillRect(OX-6,OY-6,CELL*COLS+12,CELL*ROWS+12);
+
+  // ---- LIGHT (drawn first, behind gems) ----
+  for(let cx=0;cx<COLS;cx++){
+    if(!isCharged(cx)) continue;
+    const {depth, ampSeams}=lightReach(cx);
+    if(depth<0) continue;
+    const px=cellX(cx);
+    const isAnchor=(cx===ANCHOR);
+    const g=ctx.createLinearGradient(0,OY,0,cellY(depth+1));
+    g.addColorStop(0, hexA(LIGHTC, isAnchor?0.26:0.20));
+    g.addColorStop(1, hexA(LIGHTC, isAnchor?0.10:0.06));
+    ctx.fillStyle=g;
+    ctx.fillRect(px, OY, CELL, (depth+1)*CELL);
+    ctx.fillStyle=hexA(LIGHTC,0.10);
+    ctx.fillRect(px+CELL*0.32, OY, CELL*0.36, (depth+1)*CELL);
+
+    // The light extends a few pixels PAST its true bottom range, bleeding into
+    // the top of the next (dark) cell — telegraphing that this boundary is where
+    // an amplifier belongs / where the light pushes through.
+    if(!isAnchor){
+      const by=cellY(depth+1);            // true bottom edge of the lit range
+      const over=Math.max(5, CELL*0.20);  // how far the glow spills past it
+      const sg=ctx.createLinearGradient(0,by-1,0,by+over);
+      sg.addColorStop(0, hexA(LIGHTC,0.34));
+      sg.addColorStop(1, hexA(LIGHTC,0.0));
+      ctx.fillStyle=sg;
+      ctx.fillRect(px, by-1, CELL, over+1);
+    }
+    for(const sy of ampSeams){
+      // sy is the seam-row (top of cell sy). The light fills DOWN to the relayed
+      // depth already (handled by the main body fill since depth includes the
+      // relay). Here we add the TELL: a few px of beam bleeding across the seam
+      // into the top of the next cell, so an amp hand-off reads differently from
+      // a clean reach cutoff. Fill last lit cell solid, spill into next cell top.
+      const seamY=cellY(sy);
+      const bleed=Math.max(5, CELL*0.22);
+      const sg=ctx.createLinearGradient(0,seamY-2,0,seamY+bleed);
+      sg.addColorStop(0, hexA(AMPC,0.5));
+      sg.addColorStop(1, hexA(AMPC,0.0));
+      ctx.fillStyle=sg;
+      ctx.fillRect(px, seamY-2, CELL, bleed+2);
+    }
+  }
+
+  // ceiling bar with droppers (lit columns bright, dark columns hollow)
+  ctx.fillStyle='#241a3a';
+  ctx.fillRect(OX-6,OY-18,CELL*COLS+12,14);
+  for(let cx=0;cx<COLS;cx++){
+    const on=isCharged(cx);
+    const dx=cellX(cx)+CELL*0.2, w=CELL*0.6;
+    if(on){
+      ctx.fillStyle = cx===ANCHOR ? '#ffe14d' : '#e8c14a';
+      ctx.fillRect(dx,OY-18,w,14);
+      ctx.beginPath(); ctx.moveTo(dx,OY-4); ctx.lineTo(dx+w,OY-4);
+      ctx.lineTo(dx+w-6,OY+2); ctx.lineTo(dx+6,OY+2); ctx.closePath(); ctx.fill();
+      if(cx===ANCHOR){ ctx.fillStyle=hexA(LIGHTC,0.95); ctx.fillRect(dx+w/2-1,OY-22,2,4); }
+    } else {
+      ctx.strokeStyle='#5a5470'; ctx.lineWidth=1.5;
+      ctx.strokeRect(dx,OY-16,w,10);
+    }
+  }
+
+  // faint grid
+  ctx.strokeStyle='#ffffff0c'; ctx.lineWidth=1;
+  for(let x=0;x<=COLS;x++){ ctx.beginPath(); ctx.moveTo(cellX(x),OY); ctx.lineTo(cellX(x),OY+CELL*ROWS); ctx.stroke(); }
+  for(let y=0;y<=ROWS;y++){ ctx.beginPath(); ctx.moveTo(OX,cellY(y)); ctx.lineTo(OX+CELL*COLS,cellY(y)); ctx.stroke(); }
+
+  // gems
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+    const c=grid[y][x]; if(c===EMPTY) continue;
+    const isFading=fading.has(x+','+y);
+    if(isFading){ ctx.globalAlpha=0.32; }       // powerless telegraph before it vanishes
+    drawGem(cellX(x),cellY(y),c,x,y);
+    if(isFading){ ctx.globalAlpha=1;
+      // a faint dim overlay to read as "losing its luster"
+      ctx.fillStyle='rgba(10,8,20,0.35)';
+      const pad=CELL*0.12; rr(cellX(x)+pad,cellY(y)+pad,CELL-pad*2,CELL-pad*2,CELL*0.18); ctx.fill();
+    }
+  }
+  // selection
+  if(sel){ ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.globalAlpha=.9;
+    rr(cellX(sel.x)+3,cellY(sel.y)+3,CELL-6,CELL-6,10); ctx.stroke(); ctx.globalAlpha=1; }
+
+  // dams (horizontal welds on seams)
+  for(const key of dams){ const [x,y]=key.split(',').map(Number);
+    const px=cellX(x), py=cellY(y);
+    ctx.strokeStyle=DAMC; ctx.lineWidth=5; ctx.lineCap='round';
+    ctx.shadowColor=DAMC; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(px+4,py); ctx.lineTo(px+CELL-4,py); ctx.stroke();
+    ctx.shadowBlur=0;
+  }
+  // amplifiers (double-bar relay: blocks fall like a dam + relays light down)
+  for(const key of amplifiers){ const [x,y]=key.split(',').map(Number);
+    const px=cellX(x), py=cellY(y);
+    ctx.strokeStyle=AMPC; ctx.lineWidth=4; ctx.lineCap='round';
+    ctx.shadowColor=AMPC; ctx.shadowBlur=12;
+    ctx.beginPath(); ctx.moveTo(px+4,py-2); ctx.lineTo(px+CELL-4,py-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px+4,py+2); ctx.lineTo(px+CELL-4,py+2); ctx.stroke();
+    // downward relay ticks
+    ctx.lineWidth=2;
+    for(const t of [0.3,0.5,0.7]){ ctx.beginPath();
+      ctx.moveTo(px+CELL*t,py+3); ctx.lineTo(px+CELL*t,py+7); ctx.stroke(); }
+    ctx.shadowBlur=0;
+  }
+  // swappers (vertical clamps on seams)
+  for(const key of swappers){ const [x,y]=key.split(',').map(Number);
+    const px=cellX(x), py=cellY(y);
+    ctx.strokeStyle=SWAPC; ctx.lineWidth=5; ctx.lineCap='round';
+    ctx.shadowColor=SWAPC; ctx.shadowBlur=10;
+    ctx.beginPath(); ctx.moveTo(px,py+4); ctx.lineTo(px,py+CELL-4); ctx.stroke();
+    // little arrows
+    ctx.fillStyle=SWAPC;
+    ctx.beginPath(); ctx.moveTo(px-6,py+CELL/2); ctx.lineTo(px-1,py+CELL/2-4); ctx.lineTo(px-1,py+CELL/2+4); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(px+6,py+CELL/2); ctx.lineTo(px+1,py+CELL/2-4); ctx.lineTo(px+1,py+CELL/2+4); ctx.fill();
+    ctx.shadowBlur=0;
+  }
+
+  // splitters (chevron in a cell, pointing the push direction)
+  for(const [key,s] of splitters){ const [x,y]=key.split(',').map(Number);
+    const px=cellX(x), py=cellY(y), m=CELL/2;
+    ctx.strokeStyle=SPLITC; ctx.lineWidth=4; ctx.lineCap='round'; ctx.lineJoin='round';
+    ctx.shadowColor=SPLITC; ctx.shadowBlur=10;
+    // a downward fork: vertical stem + an angled prong toward s.dir
+    ctx.beginPath();
+    ctx.moveTo(px+m, py+CELL*0.18);
+    ctx.lineTo(px+m, py+CELL*0.55);
+    ctx.lineTo(px+m + s.dir*CELL*0.28, py+CELL*0.82);
+    ctx.moveTo(px+m, py+CELL*0.55);
+    ctx.lineTo(px+m, py+CELL*0.82);
+    ctx.stroke();
+    ctx.shadowBlur=0;
+  }
+
+  // placement affordance: glowing corner dots when a seam tool is active
+  if(tool==='dam'||tool==='swap'||tool==='amp'){
+    const col=tool==='dam'?DAMC:(tool==='amp'?AMPC:SWAPC);
+    for(let cx=0;cx<=COLS;cx++) for(let cy=0;cy<=ROWS;cy++){
+      const px=cellX(cx), py=cellY(cy);
+      ctx.fillStyle=col; ctx.globalAlpha=.5;
+      ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    // active drag preview
+    if(drag && drag.mode==='place'){
+      const a=drag.fromCorner;
+      ctx.strokeStyle=col; ctx.lineWidth=4; ctx.globalAlpha=.8; ctx.lineCap='round';
+      ctx.beginPath(); ctx.moveTo(cellX(a.cx),cellY(a.cy));
+      ctx.lineTo(drag.px,drag.py); ctx.stroke(); ctx.globalAlpha=1;
+    }
+  }
+  // splitter affordance: highlight cell centers; show direction during drag
+  if(tool==='split'){
+    for(let x=0;x<COLS;x++) for(let y=0;y<ROWS;y++){
+      const px=cellX(x)+CELL/2, py=cellY(y)+CELL/2;
+      ctx.fillStyle=SPLITC; ctx.globalAlpha=.18;
+      ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha=1;
+    if(drag && drag.mode==='split' && inBounds(drag.from.x,drag.from.y)){
+      const c=drag.from, dir=(drag.px-drag.sx)<0?-1:1;
+      const px=cellX(c.x), py=cellY(c.y);
+      ctx.strokeStyle=SPLITC; ctx.lineWidth=2; ctx.globalAlpha=.7;
+      rr(px+3,py+3,CELL-6,CELL-6,8); ctx.stroke();
+      ctx.fillStyle=SPLITC;
+      const ax=px+CELL/2+dir*CELL*0.3, ay=py+CELL/2;
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ax-dir*8,ay-5); ctx.lineTo(ax-dir*8,ay+5); ctx.fill();
+      ctx.globalAlpha=1;
+    }
+  }
+
+  // pop flashes
+  const now=performance.now();
+  for(const [k,t0] of popping){ const t=(now-t0)/220; if(t>=1){popping.delete(k);continue;}
+    const [x,y]=k.split(',').map(Number);
+    const lit=poppingLit.get(k);
+    ctx.strokeStyle=lit?LIGHTC:'#ffffff'; ctx.globalAlpha=(1-t)*(lit?1:0.4); ctx.lineWidth=2;
+    rr(cellX(x)+CELL*t*0.3, cellY(y)+CELL*t*0.3, CELL*(1-t*0.6), CELL*(1-t*0.6), 8);
+    ctx.stroke(); ctx.globalAlpha=1;
+  }
+  // denial flashes (tried to place an amp in the dark)
+  for(let i=denials.length-1;i>=0;i--){ const d=denials[i];
+    const t=(now-d.t)/500; if(t>=1){denials.splice(i,1);continue;}
+    const px=cellX(d.x), py=cellY(d.y);
+    ctx.strokeStyle='#ff5a6a'; ctx.globalAlpha=(1-t)*0.9; ctx.lineWidth=3; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(px+5,py); ctx.lineTo(px+CELL-5,py); ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+  // ignition flashes (a column just latched on)
+  for(let i=newlyLit.length-1;i>=0;i--){ const n=newlyLit[i];
+    const t=(now-n.t)/600; if(t>=1){newlyLit.splice(i,1);continue;}
+    const px=cellX(n.x);
+    ctx.fillStyle=hexA(LIGHTC,(1-t)*0.5);
+    ctx.fillRect(px, OY, CELL, CELL*2*(1-t)+CELL);
+    ctx.strokeStyle=hexA('#ffffff',(1-t)*0.8); ctx.lineWidth=2;
+    ctx.strokeRect(px+2,OY+2,CELL-4,CELL-4);
+  }
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function drawGem(sx,sy,color,gx,gy){
+  const pad=CELL*0.12, x=sx+pad, y=sy+pad, s=CELL-pad*2;
+  const c=COLORS[color], g=ctx.createLinearGradient(x,y,x+s,y+s);
+  g.addColorStop(0,lighten(c,.35)); g.addColorStop(.55,c); g.addColorStop(1,lighten(c,-.3));
+  rr(x,y,s,s,s*0.22); ctx.fillStyle=g; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x+s*0.18,y+s*0.18); ctx.lineTo(x+s*0.6,y+s*0.2);
+  ctx.lineTo(x+s*0.3,y+s*0.5); ctx.closePath(); ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.fill();
+}
+function lighten(hex,amt){ let c=hex.replace('#','');
+  if(c.length===3)c=c.split('').map(ch=>ch+ch).join('');
+  let r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  if(amt>=0){r+=(255-r)*amt;g+=(255-g)*amt;b+=(255-b)*amt;}else{r*=1+amt;g*=1+amt;b*=1+amt;}
+  return `rgb(${r|0},${g|0},${b|0})`; }
+function hexA(hex,a){ let c=hex.replace('#','');
+  if(c.length===3)c=c.split('').map(ch=>ch+ch).join('');
+  const r=parseInt(c.slice(0,2),16),g=parseInt(c.slice(2,4),16),b=parseInt(c.slice(4,6),16);
+  return `rgba(${r},${g},${b},${a})`; }
+
+/* ---- stats / hint ---- */
+function updateStats(){
+  document.getElementById('total').textContent=collected.toLocaleString();
+  document.getElementById('ndam').textContent=dams.size;
+  document.getElementById('nswap').textContent=swappers.size;
+  document.getElementById('nsplit').textContent=splitters.size;
+  document.getElementById('namp').textContent=amplifiers.size;
+  let n=0; for(let x=0;x<COLS;x++) if(isCharged(x)) n++;
+  document.getElementById('dstate').textContent=n+' / '+COLS;
+  document.getElementById('nlost').textContent=lostToDark;
+}
+let hintTimer; function fadeHint(){ clearTimeout(hintTimer);
+  hintTimer=setTimeout(()=>{document.getElementById('hint').style.opacity='0';},2600); }
+
+/* ---- main loop ---- */
+function frame(now){
+  acc+=now-last; last=now;
+  while(acc>=TICK){ tick(); acc-=TICK; }
+  draw();
+  requestAnimationFrame(frame);
+}
+resize(); updateStats(); fadeHint();
+// seed the starting first-ring columns (anchor fills itself via the heartbeat)
+if(ANCHOR-1>=0) refill(ANCHOR-1, 3);
+if(ANCHOR+1<COLS) refill(ANCHOR+1, 3);
+requestAnimationFrame(n=>{last=n; requestAnimationFrame(frame);});
+</script>
+</body>
+</html>
