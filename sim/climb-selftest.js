@@ -96,5 +96,45 @@ console.log('Glitterdelve CLIMB self-test\n');
   approx('floor drain yields no energy', s4.harvested, harvestBefore);
 }
 
+/* 5. Slope diverts EVERY gem; Splitter alternates; a falling gem breaks a Lens */
+{
+  const R = makeClimbRules();
+  // Slope: two gems dropped through the same cell both go sideways
+  const s = createClimbState(R, 1);
+  for (let y = 0; y < R.rows; y++) for (const x of [2, 3]) { s.grid[y][x] = EMPTY; s.life[y][x] = 0; }
+  s.pieces.get('slope').set('2,10', { dir: 1, flip: false });
+  s.grid[9][2] = 0; s.life[9][2] = 9;
+  stepGravityClimb(s); // gem at (2,9) -> falls to slope cell (2,10)
+  stepGravityClimb(s); // at the slope -> diverts to col 3
+  let onCol3 = false; for (let y = 0; y < R.rows; y++) if (s.grid[y][3] === 0) onCol3 = true;
+  ok('slope diverts the gem sideways', onCol3);
+  // a second gem through the same slope ALSO diverts (always)
+  s.grid[9][2] = 1; s.life[9][2] = 9;
+  stepGravityClimb(s); stepGravityClimb(s);
+  let secondOnCol3 = false; for (let y = 0; y < R.rows; y++) if (s.grid[y][3] === 1) secondOnCol3 = true;
+  ok('slope diverts the next gem too (every gem)', secondOnCol3);
+
+  // Splitter: one straight, the next sideways
+  const s2 = createClimbState(R, 1);
+  for (let y = 0; y < R.rows; y++) for (const x of [5, 6]) { s2.grid[y][x] = EMPTY; s2.life[y][x] = 0; }
+  s2.pieces.get('split').set('5,10', { dir: 1, flip: false });
+  s2.grid[10][5] = 0; s2.life[10][5] = 9;
+  stepGravityClimb(s2); // flip false -> straight to (5,11)
+  const straight = s2.grid[11][5] === 0;
+  s2.grid[10][5] = 1; s2.life[10][5] = 9;
+  stepGravityClimb(s2); // flip now true -> divert to col 6
+  let diverted = false; for (let y = 0; y < R.rows; y++) if (s2.grid[y][6] === 1) diverted = true;
+  ok('splitter passes one straight then diverts the next', straight && diverted);
+
+  // Lens fragility: a gem falling onto a lens seam removes the lens
+  const s3 = createClimbState(R, 1);
+  for (let y = 0; y < R.rows; y++) { s3.grid[y][4] = EMPTY; s3.life[y][4] = 0; }
+  s3.pieces.get('amp').set('4,11', true); // lens seam below cell (4,10)
+  s3.grid[10][4] = 0; s3.life[10][4] = 9;
+  stepGravityClimb(s3);
+  ok('falling gem breaks the lens', !s3.pieces.get('amp').has('4,11'));
+  ok('gem passed through the broken lens', s3.grid[11][4] === 0);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
