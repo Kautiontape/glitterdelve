@@ -187,5 +187,53 @@ console.log('Glitterdelve CLIMB self-test\n');
   ok('frontier hit 0 sets won', sw.frontier === 0 && sw.won === true);
 }
 
+/* 7. swapper makes a match-creating swap (and carries life); spawn curtain;
+      economy place/remove/bomb with cost gating; full tick is deterministic */
+{
+  const R = makeClimbRules();
+  // Swapper: seam between (2,y) and (3,y); left=0,right=1, with 0s at 4,5 ->
+  // swapping 0 across the seam makes 3,4,5 a run of color 0
+  const s = createClimbState(R, 1);
+  const y = R.rows - 2;
+  for (let x = 0; x < R.cols; x++) { s.grid[y][x] = EMPTY; s.life[y][x] = 0; }
+  s.grid[y][2] = 0; s.grid[y][3] = 1; s.grid[y][4] = 0; s.grid[y][5] = 0;
+  for (const x of [2, 3, 4, 5]) s.life[y][x] = 9;
+  s.pieces.get('swap').set('3,' + y, true);
+  stepSwappersClimb(s);
+  ok('swapper performed the match-making swap', s.grid[y][3] === 0);
+  approx('swapper carried life across the seam', s.life[y][3], 9);
+
+  // spawn curtain: emits into empty top cells (seeded)
+  const ss = createClimbState(R, 2);
+  for (let x = 0; x < R.cols; x++) { ss.grid[0][x] = EMPTY; ss.life[0][x] = 0; }
+  stepSpawnClimb(ss);
+  let emitted = 0; for (let x = 0; x < R.cols; x++) if (ss.grid[0][x] !== EMPTY) emitted++;
+  ok('spawn curtain emits some gems at the top', emitted > 0);
+  ok('emitted gems have life', (() => { for (let x = 0; x < R.cols; x++) if (ss.grid[0][x] !== EMPTY && ss.life[0][x] < 1) return false; return true; })());
+
+  // economy: cost gating
+  const se = createClimbState(R, 3);
+  se.energy = 5;
+  ok('cannot afford a Lens (cost 9)', placeClimb(se, 'amp', { x: 4, y: se.frontier }) === false);
+  ok('can afford a Wall (cost 3)', placeClimb(se, 'dam', { x: 4, y: 10 }) === true);
+  approx('wall deducted 3 energy', se.energy, 2);
+  approx('spent tracked', se.spent, 3);
+  ok('remove deletes the piece', removeClimb(se, 'dam', { x: 4, y: 10 }) === true);
+  // bomb: free, destroys a gem
+  se.grid[12][4] = 0; se.life[12][4] = 5;
+  const eb = se.energy;
+  ok('bomb destroys a gem', bombClimb(se, 4, 12) === true && se.grid[12][4] === EMPTY);
+  approx('bomb is free', se.energy, eb);
+  ok('costOf reads the table', costOf(se, 'swap') === 6 && costOf(se, 'bomb') === 0);
+
+  // full tick determinism
+  const a = createClimbState(R, 99), b = createClimbState(R, 99);
+  for (let i = 0; i < 120; i++) { tickClimb(a); tickClimb(b); }
+  ok('tick is deterministic (harvested)', a.harvested === b.harvested);
+  ok('tick is deterministic (lost)', a.lost === b.lost);
+  ok('tick is deterministic (frontier)', a.frontier === b.frontier);
+  ok('a no-build game still loses gems to decay', a.lost > 0);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

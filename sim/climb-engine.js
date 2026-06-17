@@ -80,6 +80,8 @@ function fallInto(state, fx, fy, tx, ty) {
   moveGem(state, fx, fy, tx, ty, nl);
 }
 
+function findTool(R, id) { for (const t of R.tools) if (t.id === id) return t; return null; }
+
 export function createClimbState(rules, seed, opts = {}) {
   const R = rules;
   const grid = [], life = [];
@@ -97,7 +99,17 @@ export function createClimbState(rules, seed, opts = {}) {
   prefill(state);
   return state;
 }
-export function tickClimb() { throw new Error('not implemented'); }
+/* One climb tick: machines -> resolve -> gravity -> spawn -> resolve. */
+export function tickClimb(state) {
+  if (state.won) return;
+  if (state.events) { state.events.popping.length = 0; state.events.broke.length = 0; }
+  stepSwappersClimb(state);
+  resolveClimb(state);
+  stepGravityClimb(state);
+  stepSpawnClimb(state);
+  resolveClimb(state);
+  state.ticks++;
+}
 export function stepGravityClimb(state) {
   const R = state.rules;
   // drain whatever rested on the Glitterdelve floor last tick (anti-clog, 0 energy)
@@ -190,12 +202,78 @@ export function resolveClimb(state) {
   }
   return true;
 }
-export function stepSwappersClimb() { throw new Error('not implemented'); }
-export function stepSpawnClimb() { throw new Error('not implemented'); }
-export function placeClimb() { throw new Error('not implemented'); }
-export function removeClimb() { throw new Error('not implemented'); }
-export function bombClimb() { throw new Error('not implemented'); }
-export function costOf() { throw new Error('not implemented'); }
+/* Each tick, for every Swapper seam, swap the two gems across it (grid AND life)
+   only if the swap creates a match; otherwise revert. The pure-builder's only
+   active match-maker. */
+export function stepSwappersClimb(state) {
+  const R = state.rules, g = state.grid, lf = state.life;
+  for (const t of R.tools) {
+    if (!t.swapOnMatch) continue;
+    const m = state.pieces.get(t.id);
+    if (!m) continue;
+    for (const key of m.keys()) {
+      const ci = key.indexOf(',');
+      const x = +key.slice(0, ci), y = +key.slice(ci + 1); // seam between (x-1,y) and (x,y)
+      const ax = x - 1, bx = x;
+      if (!inBounds(state, ax, y) || !inBounds(state, bx, y)) continue;
+      const a = g[y][ax], b = g[y][bx];
+      if (a === EMPTY || b === EMPTY || a === b) continue;
+      g[y][ax] = b; g[y][bx] = a;
+      const la = lf[y][ax], lb = lf[y][bx]; lf[y][ax] = lb; lf[y][bx] = la;
+      if (matchesAt(state, ax, y).size > 0 || matchesAt(state, bx, y).size > 0) {
+        // keep — resolveClimb will clear it
+      } else { g[y][ax] = a; g[y][bx] = b; lf[y][ax] = la; lf[y][bx] = lb; } // revert
+    }
+  }
+}
+
+/* The Source rains gems into empty top-row cells (seeded). No free matches:
+   spawnColor avoids completing a run with what's already below/beside. */
+export function stepSpawnClimb(state) {
+  if (state.won) return;
+  const R = state.rules;
+  for (let x = 0; x < R.cols; x++) {
+    if (state.grid[0][x] === EMPTY && state.rng() < (R.spawnDensity || 0)) {
+      state.grid[0][x] = spawnColor(state, x, 0);
+      state.life[0][x] = randLife(state);
+    }
+  }
+}
+
+export function costOf(state, toolId) {
+  const c = state.rules.costs;
+  return (c && c[toolId] != null) ? c[toolId] : 0;
+}
+const CLH = { inBounds, canRest, isLit, litCeiling, EMPTY };
+/* Place a structure if affordable and legal; deduct its cost. Diverters carry a
+   {dir,flip} payload; everything else carries `true`. */
+export function placeClimb(state, toolId, pos) {
+  const t = findTool(state.rules, toolId);
+  if (!t || t.kind === 'action') return false;
+  if (t.validate && !t.validate(state, pos, CLH)) return false;
+  const m = state.pieces.get(toolId);
+  if (!m) return false;
+  const key = pos.x + ',' + pos.y;
+  if (m.has(key)) return false; // already occupied
+  const cost = costOf(state, toolId);
+  if (state.energy < cost) return false;
+  const payload = t.divert ? { dir: pos.dir === -1 ? -1 : 1, flip: false } : true;
+  m.set(key, payload);
+  state.energy -= cost; state.spent += cost;
+  return true;
+}
+/* Remove a structure (no refund — building is a commitment). */
+export function removeClimb(state, toolId, pos) {
+  const m = state.pieces.get(toolId);
+  if (!m) return false;
+  return m.delete(pos.x + ',' + pos.y);
+}
+/* Bomb: destroy one gem in a cell. Free. */
+export function bombClimb(state, x, y) {
+  if (!inBounds(state, x, y) || state.grid[y][x] === EMPTY) return false;
+  clearGem(state, x, y);
+  return true;
+}
 /* The topmost lit world row in column x. Starts at the frontier (rows >= frontier
    are lit) and is pushed UP by any fed Lens (extendsLight) in the column. A lens
    at seam s is "fed" when its lower cell (x,s) is already lit (s >= current ceil);
