@@ -180,3 +180,24 @@ RNG (not `Math.random`), and the fading-then-lost state is a flag rather than a 
 timestamp. One incidental correctness fix: the anchor heartbeat's spawn-color call uses the
 correct `(col,row)` cell (`demo.html` passed swapped args, affecting only which color the
 anchor emits, never the mechanics).
+
+## The Climb (demo 2)
+
+A second, inverted demo built on the same engine primitives. Glitterdelve sits at
+the **bottom**; gems rain down and **decay** (each fall-step burns one life), so few
+survive the long drop — the harvest is sporadic. You're the Wall Organizer: a **pure
+builder** (no manual Cut) who deploys structures to route gems into matches inside a
+light band that **rises** as you harvest, climbing a tall shaft to the Source.
+
+- **Play:** serve the repo root and open `sim/climb.html` (`python3 -m http.server 8777`
+  from the repo root, then `http://localhost:8777/sim/climb.html`). Ruleset lives in the
+  URL (`?rows=60&seed=3&...`). Live state is on `window.__climb` for console tinkering.
+- **Tools:** Bomb (free, destroy a gem), Wall (3, blocks fall), Slope (3, diverts every
+  gem), Splitter (6, diverts every other), Swapper (6, swap-on-match — your matcher),
+  Lens (9, relays light upward but breaks when a gem hits it).
+- **Economy:** one currency — harvested energy is both score and build budget. Scoring is
+  super-linear: 3 gems = 3, 4 = 6, 5 = 12. The floor drains unmatched gems for nothing.
+- **Code:** `climb-engine.js` (headless, deterministic, reuses `engine.js` helpers),
+  `climb.js` + `climb.html` (front-end), climb ruleset/tools in `rules.js`, `drawClimb`
+  in `render.js`. Tests: `node climb-selftest.js` (or `npm run climbtest`). Demo 1
+  (`engine.js`/`demo.html`) is untouched.

@@ -526,7 +526,7 @@ Replace the `stepGravityClimb` stub with:
 export function stepGravityClimb(state) {
   const R = state.rules;
   // drain whatever rested on the Glitterdelve floor last tick (anti-clog, 0 energy)
-  for (let x = 0; x < R.cols; x++) if (state.grid[R.rows - 1][x] !== EMPTY) clearGem(state, R.rows - 1, x);
+  for (let x = 0; x < R.cols; x++) if (state.grid[R.rows - 1][x] !== EMPTY) clearGem(state, x, R.rows - 1);
 
   for (let y = R.rows - 2; y >= 0; y--) {
     for (let x = 0; x < R.cols; x++) {
