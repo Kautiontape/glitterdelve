@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Glitterdelve — Playable (modular engine)</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<style>
+  :root{
+    --bg:#0e0b16; --panel:#181226; --panel2:#1f1733; --ink:#e8e3f5; --muted:#8a82a8;
+    --line:#2a2140; --accent:#c9a227;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:none;}
+  #stage{position:absolute;left:0;right:0;top:0;bottom:92px;
+    background:radial-gradient(1100px 700px at 70% -10%,#1c1430 0%,transparent 60%),var(--bg);}
+  canvas{display:block;width:100%;height:100%;}
+  .topbar{position:absolute;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none;z-index:2;}
+  .card{background:color-mix(in srgb,var(--panel) 88%,transparent);border:1px solid var(--line);
+    border-radius:14px;padding:10px 14px;backdrop-filter:blur(8px);}
+  .total{font-size:22px;font-weight:700;letter-spacing:-.02em;}
+  .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+  .stat{margin-left:auto;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .stat b{color:var(--ink);font-weight:600;}
+  .links{position:absolute;top:12px;right:12px;display:flex;gap:8px;z-index:3;}
+  .links a,.gear{font-size:12px;color:var(--muted);text-decoration:none;border:1px solid var(--line);
+    background:color-mix(in srgb,var(--panel) 80%,transparent);border-radius:9px;padding:5px 9px;cursor:pointer;}
+  .links a:hover,.gear:hover{color:var(--ink);}
+  .toolbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
+    background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);
+    border-radius:16px;padding:8px;backdrop-filter:blur(8px);z-index:2;}
+  .tool{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:66px;
+    padding:8px 10px;border-radius:11px;border:1px solid transparent;cursor:pointer;
+    color:var(--muted);font-size:11px;transition:.15s;}
+  .tool:hover{color:var(--ink);background:#ffffff0d;}
+  .tool.active{color:var(--ink);border-color:currentColor;background:#ffffff14;}
+  .tool .ic{font-size:18px;line-height:1;}
+  .hint{position:absolute;bottom:86px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--muted);
+    text-align:center;pointer-events:none;background:color-mix(in srgb,var(--panel) 80%,transparent);
+    border:1px solid var(--line);border-radius:10px;padding:7px 13px;transition:opacity .5s;max-width:90vw;z-index:2;}
+  .panel{position:absolute;top:52px;right:12px;width:230px;z-index:4;display:none;
+    background:color-mix(in srgb,var(--panel) 95%,transparent);border:1px solid var(--line);
+    border-radius:14px;padding:14px;backdrop-filter:blur(8px);}
+  .panel.open{display:block;}
+  .panel h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);}
+  .panel .row{display:flex;gap:8px;margin-bottom:8px;}
+  .panel .row>div{flex:1;}
+  .panel label{font-size:11px;color:var(--muted);display:block;margin-bottom:3px;}
+  .panel input{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:7px;padding:6px 8px;font-size:13px;font-family:inherit;}
+  .panel button{width:100%;background:var(--accent);color:#1a1206;border:none;border-radius:9px;
+    padding:9px;font-weight:700;cursor:pointer;margin-top:4px;}
+  .panel .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4;}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div class="topbar">
+  <div class="card">
+    <div class="total" id="total">0</div>
+    <div class="label">gems cut</div>
+  </div>
+  <div class="card stat" id="stats"></div>
+</div>
+
+<div class="links">
+  <span class="gear" id="gear">⚙ rules</span>
+  <a href="./index.html">lab →</a>
+</div>
+
+<div class="panel" id="panel">
+  <h3>Ruleset (restart to apply)</h3>
+  <div class="row">
+    <div><label>cols</label><input type="number" id="r_cols"></div>
+    <div><label>rows</label><input type="number" id="r_rows"></div>
+  </div>
+  <div class="row">
+    <div><label>colors</label><input type="number" id="r_ncol"></div>
+    <div><label>anchor</label><input type="number" id="r_anchor"></div>
+  </div>
+  <div class="row">
+    <div><label>baseReach</label><input type="number" id="r_baseReach"></div>
+    <div><label>ampReach</label><input type="number" id="r_ampReach"></div>
+  </div>
+  <div class="row">
+    <div><label>seed</label><input type="number" id="r_seed"></div>
+    <div><label>tick ms</label><input type="number" id="r_tick"></div>
+  </div>
+  <button id="restart">Restart</button>
+  <button id="pause" style="background:transparent;color:var(--ink);border:1px solid var(--line);">Pause</button>
+  <div class="note">Same engine as the lab. Tweak/invert rules here, restart, play. State lives in the URL — share/bookmark it.</div>
+</div>
+
+<div class="hint" id="hint"></div>
+<div class="toolbar" id="toolbar"></div>
+
+<script type="module" src="./play.js"></script>
+</body>
+</html>
