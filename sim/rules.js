@@ -101,3 +101,62 @@ export function makeRules(overrides = {}) {
   r.tickOrder = overrides.tickOrder || DEFAULT_RULES.tickOrder.slice();
   return r;
 }
+
+/* =====================================================================
+   CLIMB MODE ("The Climb") — demo 2 ruleset + tool registry.
+   Bottom-anchored rising light, per-fall decay, energy economy. Consumed
+   by climb-engine.js / climb.js. DEFAULT_RULES/TOOLS above are untouched.
+   ===================================================================== */
+export const CLIMB_TOOLS = [
+  { id: 'bomb', name: 'Bomb', icon: '✸', kind: 'action' }, // destroys one gem; free
+  {
+    id: 'dam', name: 'Wall', icon: '▬', seam: 'horizontal', blocksFall: true,
+    validate: (s, p) => p.x >= 0 && p.x < s.rules.cols && p.y >= 1 && p.y < s.rules.rows,
+  },
+  {
+    id: 'slope', name: 'Slope', icon: '◣', seam: 'cell', divert: true, always: true,
+    validate: (s, p, H) => H.inBounds(s, p.x, p.y),
+  },
+  {
+    id: 'split', name: 'Splitter', icon: '⋔', seam: 'cell', divert: true,
+    validate: (s, p, H) => H.inBounds(s, p.x, p.y),
+  },
+  {
+    id: 'swap', name: 'Swapper', icon: '⇄', seam: 'vertical', swapOnMatch: true,
+    validate: (s, p) => p.x >= 1 && p.x < s.rules.cols && p.y >= 0 && p.y < s.rules.rows,
+  },
+  {
+    id: 'amp', name: 'Lens', icon: '≣', seam: 'horizontal', extendsLight: { rule: 'lensReach' }, fragile: true,
+    validate: (s, p) => p.x >= 0 && p.x < s.rules.cols && p.y >= 1 && p.y < s.rules.rows,
+  },
+];
+
+export const CLIMB_RULES = {
+  cols: 9,
+  rows: 80,          // WORLD_ROWS — the predefined shaft height
+  ncol: 6,
+  baseReach: 4,      // lit rows above the floor at the start
+  lensReach: 4,      // rows a Lens relays light upward
+  lifeMin: 6,        // randomized gem life (fall-steps), inclusive range
+  lifeMax: 14,
+  initDensity: 0.45, // chance a cell is pre-filled at start
+  spawnDensity: 0.55,// chance the Source emits into an empty top cell each tick
+  startGrant: 9,     // starting energy
+  view: 14,          // rows visible in the camera window
+  costs: { bomb: 0, dam: 3, slope: 3, split: 6, swap: 6, amp: 9 },
+  scoring: { 3: 3, 4: 6, 5: 12 }, // energy per lit run of N gems
+  tickOrder: ['machines', 'resolve', 'gravity', 'spawn', 'resolve'], // informational
+  tools: CLIMB_TOOLS,
+};
+
+/* Build a climb ruleset from scalar overrides (cols, rows, baseReach, lensReach,
+   lifeMin, lifeMax, initDensity, spawnDensity, startGrant, view). tools/costs/
+   scoring/tickOrder fall back to the climb defaults. */
+export function makeClimbRules(overrides = {}) {
+  const r = Object.assign({}, CLIMB_RULES, overrides);
+  r.tools = overrides.tools || CLIMB_RULES.tools;
+  r.costs = overrides.costs || CLIMB_RULES.costs;
+  r.scoring = overrides.scoring || CLIMB_RULES.scoring;
+  r.tickOrder = overrides.tickOrder || CLIMB_RULES.tickOrder.slice();
+  return r;
+}

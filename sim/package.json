@@ -6,6 +6,7 @@
   "description": "Headless, ruleset-driven simulation harness for Glitterdelve (CLI + web viewer).",
   "scripts": {
     "test": "node selftest.js",
+    "climbtest": "node climb-selftest.js",
     "sim": "node cli.js"
   }
 }
