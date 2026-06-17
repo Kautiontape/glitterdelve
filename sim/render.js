@@ -8,10 +8,12 @@
    gallery thumbnails AND the full replay viewer, so the sim looks like the game.
    ===================================================================== */
 import { lightReach } from './engine.js';
+import { isLit as climbIsLit, litCeiling as climbLitCeiling } from './climb-engine.js';
 
 // palette copied from demo.html's :root so render is self-contained
 const COLORS = ['#e0496b', '#3fb6d3', '#5dd36a', '#f2b134', '#9b6cf0', '#ec6fb0'];
 const DAMC = '#c9a227', SWAPC = '#5fe0d0', SPLITC = '#ff8a4c', AMPC = '#ffe14d', LIGHTC = '#fff2a8';
+const SLOPEC = '#7fd49a';
 const EMPTY = -1;
 
 export function computeLayout(w, h, rules, opts = {}) {
@@ -156,6 +158,128 @@ function drawActions(ctx, actions, rules, layout) {
       ctx.fillStyle = hexA('#ffffff', 0.85);
       ctx.beginPath(); ctx.arc(cx(a.x) + (a.tool === 'split' ? cell / 2 : 0), cy(a.y), Math.max(2, cell * 0.12), 0, Math.PI * 2); ctx.fill();
     }
+  }
+}
+
+/* =====================================================================
+   CLIMB RENDER (demo 2). Draws a VIEW-row window of the tall shaft at world
+   offset camTop: the rising light band, decaying gems (dim in the dark, faint
+   when dying), the Glitterdelve floor, the Source, and the climb pieces.
+   ===================================================================== */
+export function drawClimb(ctx, state, rules, layout, camTop) {
+  const { cell, ox, oy } = layout;
+  const view = rules.view;
+  const cxp = (x) => ox + x * cell;
+  const ryp = (y) => oy + (y - camTop) * cell; // world row -> screen y
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  // frame
+  ctx.fillStyle = '#00000035';
+  ctx.fillRect(ox - 4, oy - 4, cell * rules.cols + 8, cell * view + 8);
+
+  // light band (per column, including lens-extended ceiling)
+  for (let x = 0; x < rules.cols; x++) {
+    const ceil = climbLitCeiling(state, x);
+    for (let sy = 0; sy < view; sy++) {
+      const y = camTop + sy;
+      if (y < 0 || y >= rules.rows) continue;
+      if (y >= ceil) {
+        ctx.fillStyle = hexA(LIGHTC, y >= state.frontier ? 0.16 : 0.10); // base band brighter than relayed
+        ctx.fillRect(cxp(x), ryp(y), cell, cell);
+      }
+    }
+  }
+
+  // faint grid
+  ctx.strokeStyle = '#ffffff0c'; ctx.lineWidth = 1;
+  for (let x = 0; x <= rules.cols; x++) { ctx.beginPath(); ctx.moveTo(cxp(x), oy); ctx.lineTo(cxp(x), oy + cell * view); ctx.stroke(); }
+  for (let sy = 0; sy <= view; sy++) { ctx.beginPath(); ctx.moveTo(ox, oy + sy * cell); ctx.lineTo(ox + cell * rules.cols, oy + sy * cell); ctx.stroke(); }
+
+  // Glitterdelve floor (if the bottom is in view)
+  if (rules.rows - 1 >= camTop && rules.rows - 1 < camTop + view) {
+    const fy = ryp(rules.rows - 1);
+    ctx.fillStyle = '#e8c14a'; ctx.fillRect(ox - 4, fy + cell - 3, cell * rules.cols + 8, 6);
+  }
+  // The Source (if the top is in view) — glows pink when revealed (won)
+  if (camTop <= 0) {
+    ctx.fillStyle = state.won ? '#ff6b9d' : '#3a2a52';
+    ctx.fillRect(ox - 4, ryp(0) - 12, cell * rules.cols + 8, 10);
+  }
+
+  // gems: full alpha when lit, dimmed when dark, faint when about to break
+  for (let sy = 0; sy < view; sy++) {
+    const y = camTop + sy;
+    if (y < 0 || y >= rules.rows) continue;
+    for (let x = 0; x < rules.cols; x++) {
+      const c = state.grid[y][x];
+      if (c === EMPTY) continue;
+      const lit = climbIsLit(state, x, y);
+      const dying = state.life[y][x] <= 1;
+      ctx.globalAlpha = dying ? 0.3 : (lit ? 1 : 0.5);
+      drawGem(ctx, cxp(x), ryp(y), cell, c, cell >= 18);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  drawClimbPieces(ctx, state, rules, layout, camTop);
+}
+
+function drawClimbPieces(ctx, state, rules, layout, camTop) {
+  const { cell, ox } = layout;
+  const cxp = (x) => ox + x * cell;
+  const ryp = (y) => layout.oy + (y - camTop) * cell;
+  const get = (id) => state.pieces.get(id) || new Map();
+  const inView = (y) => y >= camTop && y < camTop + rules.view + 1;
+
+  // Walls (horizontal seam)
+  for (const key of get('dam').keys()) {
+    const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
+    if (!inView(y)) continue;
+    ctx.strokeStyle = DAMC; ctx.lineWidth = Math.max(2, cell * 0.09); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y)); ctx.lineTo(cxp(x) + cell - 3, ryp(y)); ctx.stroke();
+  }
+  // Lenses (double bar; drawn dashed-ish to read as fragile)
+  for (const key of get('amp').keys()) {
+    const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
+    if (!inView(y)) continue;
+    ctx.strokeStyle = AMPC; ctx.lineWidth = Math.max(1.5, cell * 0.06); ctx.lineCap = 'butt';
+    ctx.setLineDash([Math.max(3, cell * 0.14), Math.max(2, cell * 0.08)]);
+    ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y) - 2); ctx.lineTo(cxp(x) + cell - 3, ryp(y) - 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y) + 2); ctx.lineTo(cxp(x) + cell - 3, ryp(y) + 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // Swappers (vertical seam)
+  for (const key of get('swap').keys()) {
+    const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
+    if (!inView(y)) continue;
+    ctx.strokeStyle = SWAPC; ctx.lineWidth = Math.max(2, cell * 0.09); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cxp(x), ryp(y) + 3); ctx.lineTo(cxp(x), ryp(y) + cell - 3); ctx.stroke();
+  }
+  // Splitters (downward fork chevron in a cell)
+  for (const [key, p] of get('split')) {
+    const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
+    if (!inView(y)) continue;
+    const m = cell / 2, dir = p && p.dir ? p.dir : 1;
+    ctx.strokeStyle = SPLITC; ctx.lineWidth = Math.max(2, cell * 0.07); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cxp(x) + m, ryp(y) + cell * 0.18);
+    ctx.lineTo(cxp(x) + m, ryp(y) + cell * 0.55);
+    ctx.lineTo(cxp(x) + m + dir * cell * 0.28, ryp(y) + cell * 0.82);
+    ctx.moveTo(cxp(x) + m, ryp(y) + cell * 0.55);
+    ctx.lineTo(cxp(x) + m, ryp(y) + cell * 0.82);
+    ctx.stroke();
+  }
+  // Slopes (a solid ramp triangle pointing the push direction)
+  for (const [key, p] of get('slope')) {
+    const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
+    if (!inView(y)) continue;
+    const dir = p && p.dir ? p.dir : 1;
+    const x0 = cxp(x) + cell * 0.15, x1 = cxp(x) + cell * 0.85, yb = ryp(y) + cell * 0.8, yt = ryp(y) + cell * 0.25;
+    ctx.fillStyle = hexA(SLOPEC, 0.85);
+    ctx.beginPath();
+    if (dir > 0) { ctx.moveTo(x0, yb); ctx.lineTo(x1, yb); ctx.lineTo(x1, yt); }
+    else { ctx.moveTo(x1, yb); ctx.lineTo(x0, yb); ctx.lineTo(x0, yt); }
+    ctx.closePath(); ctx.fill();
   }
 }
 
