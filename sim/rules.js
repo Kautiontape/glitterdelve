@@ -133,12 +133,15 @@ export const CLIMB_TOOLS = [
 
 export const CLIMB_RULES = {
   cols: 9,
-  rows: 80,          // WORLD_ROWS — the predefined shaft height
+  rows: 48,          // WORLD_ROWS — the predefined shaft height
   ncol: 6,
   baseReach: 4,      // lit rows above the floor at the start
   lensReach: 4,      // rows a Lens relays light upward
-  lifeMin: 6,        // randomized gem life (fall-steps), inclusive range
-  lifeMax: 14,
+  // Gem life (fall-steps) must span the shaft: most gems die mid-fall (the
+  // "sporadic options" near Glitterdelve), a lucky minority survive to the
+  // starting frontier, and the rain gets denser the higher you climb.
+  lifeMin: 22,       // randomized gem life (fall-steps), inclusive range
+  lifeMax: 52,
   initDensity: 0.45, // chance a cell is pre-filled at start
   spawnDensity: 0.55,// chance the Source emits into an empty top cell each tick
   startGrant: 9,     // starting energy
