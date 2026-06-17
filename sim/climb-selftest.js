@@ -26,5 +26,20 @@ console.log('Glitterdelve CLIMB self-test\n');
   ok('overrides apply (rows)', makeClimbRules({ rows: 40 }).rows === 40);
 }
 
+/* 2. createClimbState: deterministic shape, no free matches, frontier + grant set */
+{
+  const R = makeClimbRules();
+  const s = createClimbState(R, 7);
+  ok('grid is rows x cols', s.grid.length === R.rows && s.grid[0].length === R.cols);
+  ok('life grid mirrors the gem grid', s.life.length === R.rows && s.life[5].length === R.cols);
+  ok('starting energy is the grant', s.energy === R.startGrant);
+  ok('total harvested starts at 0', s.harvested === 0);
+  approx('frontier starts baseReach above the floor', s.frontier, R.rows - 1 - (R.baseReach - 1));
+  ok('pre-fill leaves no free matches', allMatches(s).size === 0);
+  let gems = 0; for (let y = 0; y < R.rows; y++) for (let x = 0; x < R.cols; x++) if (s.grid[y][x] !== EMPTY) gems++;
+  ok('pre-fill placed some gems', gems > 0);
+  ok('every gem has positive life', (() => { for (let y = 0; y < R.rows; y++) for (let x = 0; x < R.cols; x++) { if (s.grid[y][x] !== EMPTY && s.life[y][x] < 1) return false; } return true; })());
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
