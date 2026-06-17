@@ -55,5 +55,46 @@ console.log('Glitterdelve CLIMB self-test\n');
   ok('a neighbouring column is unaffected', litCeiling(s, x + 1) === f);
 }
 
+/* 4. gravity: gems fall one row, burn one life per step, break at 0; walls hold;
+      the Glitterdelve floor drains rested gems for 0 energy */
+{
+  const R = makeClimbRules();
+  const s = createClimbState(R, 1);
+  // clear a column to test in isolation
+  for (let y = 0; y < R.rows; y++) { s.grid[y][2] = EMPTY; s.life[y][2] = 0; }
+  s.grid[10][2] = 0; s.life[10][2] = 3;
+  stepGravityClimb(s);
+  ok('gem fell one row', s.grid[11][2] === 0 && s.grid[10][2] === EMPTY);
+  approx('one life burned by the fall', s.life[11][2], 2);
+
+  // a gem with life 1 breaks on its next fall-step (lost to the dark)
+  const s2 = createClimbState(R, 1);
+  for (let y = 0; y < R.rows; y++) { s2.grid[y][2] = EMPTY; s2.life[y][2] = 0; }
+  s2.grid[10][2] = 0; s2.life[10][2] = 1;
+  const lostBefore = s2.lost;
+  stepGravityClimb(s2);
+  ok('a 1-life gem breaks when it falls', s2.grid[10][2] === EMPTY && s2.grid[11][2] === EMPTY);
+  approx('break increments lost', s2.lost, lostBefore + 1);
+
+  // a Wall holds a gem in place (no fall, no life loss)
+  const s3 = createClimbState(R, 1);
+  for (let y = 0; y < R.rows; y++) { s3.grid[y][2] = EMPTY; s3.life[y][2] = 0; }
+  s3.grid[10][2] = 0; s3.life[10][2] = 3;
+  s3.pieces.get('dam').set('2,11', true); // wall on the seam below (2,10)
+  stepGravityClimb(s3);
+  ok('wall holds the gem', s3.grid[10][2] === 0);
+  approx('held gem loses no life', s3.life[10][2], 3);
+
+  // floor drain: a gem resting on the bottom row is consumed for 0 energy
+  const s4 = createClimbState(R, 1);
+  const fy = R.rows - 1;
+  for (let y = 0; y < R.rows; y++) { s4.grid[y][2] = EMPTY; s4.life[y][2] = 0; } // isolate the column (no gem falls in behind it)
+  s4.grid[fy][2] = 0; s4.life[fy][2] = 5;
+  const harvestBefore = s4.harvested;
+  stepGravityClimb(s4);
+  ok('floor drains the bottom-row gem', s4.grid[fy][2] === EMPTY);
+  approx('floor drain yields no energy', s4.harvested, harvestBefore);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
