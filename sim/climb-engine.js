@@ -62,22 +62,16 @@ function divertAt(state, x, y) {
   }
   return null;
 }
-/* Move a gem one row down (straight or diagonal), burning one life. A fragile
+/* Move a gem one row down (straight or diagonal), carrying its life. A fragile
    Lens on the destination seam breaks (and is removed); the gem still passes.
-   If life runs out, the gem breaks and is lost to the dark. */
+   Life is NOT spent here — gems only lose luster in the dark (see decayDark). */
 function fallInto(state, fx, fy, tx, ty) {
   const lensId = fragileAtSeam(state, tx, ty);
   if (lensId) {
     state.pieces.get(lensId).delete(tx + ',' + ty);
     if (state.events) state.events.broke.push({ x: tx, y: ty, lens: true });
   }
-  const nl = state.life[fy][fx] - 1;
-  if (nl <= 0) {
-    clearGem(state, fx, fy); state.lost++;
-    if (state.events) state.events.broke.push({ x: fx, y: fy });
-    return;
-  }
-  moveGem(state, fx, fy, tx, ty, nl);
+  moveGem(state, fx, fy, tx, ty, state.life[fy][fx]);
 }
 
 function findTool(R, id) { for (const t of R.tools) if (t.id === id) return t; return null; }
@@ -90,7 +84,7 @@ export function createClimbState(rules, seed, opts = {}) {
   for (const t of R.tools) if (t.kind !== 'action') pieces.set(t.id, new Map());
   const state = {
     rules: R, grid, life, pieces,
-    frontier: Math.max(0, R.rows - 1 - (R.baseReach - 1)), // topmost lit row at start
+    // light is bottom-anchored (base band) and raised only by lenses — see lightCeiling
     energy: R.startGrant != null ? R.startGrant : 9,
     harvested: 0, spent: 0, lost: 0, won: false, ticks: 0,
     rng: mulberry32((seed | 0) >>> 0),
@@ -99,22 +93,38 @@ export function createClimbState(rules, seed, opts = {}) {
   prefill(state);
   return state;
 }
-/* One climb tick: machines -> resolve -> gravity -> spawn -> resolve. */
+/* One climb tick: machines -> resolve -> gravity -> decay-dark -> spawn -> resolve.
+   Win when lenses have pushed the light all the way to the Source (row 0). */
 export function tickClimb(state) {
   if (state.won) return;
   if (state.events) { state.events.popping.length = 0; state.events.broke.length = 0; }
   stepSwappersClimb(state);
   resolveClimb(state);
   stepGravityClimb(state);
+  decayDark(state);
   stepSpawnClimb(state);
   resolveClimb(state);
+  if (lightCeiling(state) <= 0) state.won = true;
   state.ticks++;
+}
+/* Gems lose one life per tick spent in a DARK cell (falling or resting); lit gems
+   are safe. This is why you extend the light upward — it keeps gems alive and lets
+   them pile up. Resting gems above the light line erode, so piles self-limit. */
+export function decayDark(state) {
+  const R = state.rules;
+  const ceil = lightCeiling(state); // rows 0..ceil-1 are dark
+  for (let y = 0; y < ceil; y++) {
+    for (let x = 0; x < R.cols; x++) {
+      if (state.grid[y][x] === EMPTY) continue;
+      const nl = state.life[y][x] - 1;
+      if (nl <= 0) { clearGem(state, x, y); state.lost++; if (state.events) state.events.broke.push({ x, y }); }
+      else state.life[y][x] = nl;
+    }
+  }
 }
 export function stepGravityClimb(state) {
   const R = state.rules;
-  // drain whatever rested on the Glitterdelve floor last tick (anti-clog, 0 energy)
-  for (let x = 0; x < R.cols; x++) if (state.grid[R.rows - 1][x] !== EMPTY) clearGem(state, x, R.rows - 1);
-
+  // gems pile up: anything resting on the floor stays (no drain). Match it or bomb it.
   for (let y = R.rows - 2; y >= 0; y--) {
     for (let x = 0; x < R.cols; x++) {
       const c = state.grid[y][x];
@@ -150,9 +160,9 @@ function payout(state, n) {
 }
 
 /* Clear every maximal horizontal/vertical run of length >= 3. A run with >= 3
-   LIT cells harvests energy (payout by lit length) and raises the frontier one
-   row; dark runs clear for hygiene but score nothing. Cells shared by an H and a
-   V run clear once but score in both (a cross bonus). */
+   LIT cells harvests energy (payout by lit length); dark runs clear for hygiene
+   but score nothing. Cells shared by an H and a V run clear once but score in
+   both (a cross bonus). Harvesting funds building — it does NOT move the light. */
 export function resolveClimb(state) {
   const R = state.rules, g = state.grid;
   const clear = new Set();
@@ -197,8 +207,6 @@ export function resolveClimb(state) {
   if (energy > 0) {
     state.harvested += energy;
     state.energy += energy;
-    state.frontier = Math.max(0, state.frontier - litRuns);
-    if (state.frontier === 0) state.won = true;
   }
   return true;
 }
@@ -244,7 +252,7 @@ export function costOf(state, toolId) {
   const c = state.rules.costs;
   return (c && c[toolId] != null) ? c[toolId] : 0;
 }
-const CLH = { inBounds, canRest, isLit, litCeiling, EMPTY };
+const CLH = { inBounds, canRest, isLit, lightCeiling, EMPTY };
 /* Place a structure if affordable and legal; deduct its cost. Diverters carry a
    {dir,flip} payload; everything else carries `true`. */
 export function placeClimb(state, toolId, pos) {
@@ -274,28 +282,27 @@ export function bombClimb(state, x, y) {
   clearGem(state, x, y);
   return true;
 }
-/* The topmost lit world row in column x. Starts at the frontier (rows >= frontier
-   are lit) and is pushed UP by any fed Lens (extendsLight) in the column. A lens
-   at seam s is "fed" when its lower cell (x,s) is already lit (s >= current ceil);
-   it then lights up to row s - reach. Iterates so lenses can chain. */
-export function litCeiling(state, x) {
+/* The topmost lit world row (full width). The base band lights rows
+   [rows-baseReach .. rows-1]; any fed Lens (extendsLight) pushes the ceiling
+   UP across the whole delve. A lens at seam s is "fed" when s >= the current
+   ceiling (its lower side is lit); it then lights up to row s - reach. Iterates
+   so lenses chain. Reaching row 0 means the light has touched the Source. */
+export function lightCeiling(state) {
   const R = state.rules;
-  let ceil = state.frontier;
+  let ceil = R.rows - R.baseReach;
   let changed = true;
   while (changed) {
     changed = false;
-    for (const t of state.rules.tools) {
+    for (const t of R.tools) {
       const ext = t.extendsLight;
       if (!ext) continue;
       const m = state.pieces.get(t.id);
       if (!m) continue;
       const reach = ext.rule ? (R[ext.rule] || 0) : (ext.reach || 0);
       for (const key of m.keys()) {
-        const ci = key.indexOf(',');
-        const lx = +key.slice(0, ci), ls = +key.slice(ci + 1);
-        if (lx !== x) continue;
-        if (ls >= ceil) {
-          const nc = Math.max(0, ls - reach);
+        const s = +key.slice(key.indexOf(',') + 1); // seam row
+        if (s >= ceil) {
+          const nc = Math.max(0, s - reach);
           if (nc < ceil) { ceil = nc; changed = true; }
         }
       }
@@ -305,5 +312,5 @@ export function litCeiling(state, x) {
 }
 export function isLit(state, x, y) {
   if (!inBounds(state, x, y)) return false;
-  return y >= litCeiling(state, x);
+  return y >= lightCeiling(state);
 }

@@ -184,19 +184,22 @@ anchor emits, never the mechanics).
 ## The Climb (demo 2)
 
 A second, inverted demo built on the same engine primitives. Glitterdelve sits at
-the **bottom**; gems rain down and **decay** (each fall-step burns one life), so few
-survive the long drop — the harvest is sporadic. You're the Wall Organizer: a **pure
-builder** (no manual Cut) who deploys structures to route gems into matches inside a
-light band that **rises** as you harvest, climbing a tall shaft to the Source.
+the **bottom** with a light band above it; gems rain down and **decay only in the
+dark** (one life per tick), so few survive the drop — the harvest is sporadic. You're
+the Wall Organizer: a **pure builder** (no manual Cut) who deploys structures to make
+matches, and **raises the light with lenses**. Lifting the light keeps more gems alive
+and lets them **pile up safely** to be matched; push the light all the way to the
+Source (the top) to win.
 
 - **Play:** serve the repo root and open `sim/climb.html` (`python3 -m http.server 8777`
   from the repo root, then `http://localhost:8777/sim/climb.html`). Ruleset lives in the
-  URL (`?rows=60&seed=3&...`). Live state is on `window.__climb` for console tinkering.
+  URL (`?rows=24&seed=3&...`). Live state is on `window.__climb` for console tinkering.
 - **Tools:** Bomb (free, destroy a gem), Wall (3, blocks fall), Slope (3, diverts every
   gem), Splitter (6, diverts every other), Swapper (6, swap-on-match — your matcher),
-  Lens (9, relays light upward but breaks when a gem hits it).
-- **Economy:** one currency — harvested energy is both score and build budget. Scoring is
-  super-linear: 3 gems = 3, 4 = 6, 5 = 12. The floor drains unmatched gems for nothing.
+  Lens (9, raises the light a few rows but breaks when a gem hits it — protect it).
+- **Economy:** one currency — the headline is your **spendable** energy (what builds cost);
+  `harvested` is the running total. Scoring is super-linear: 3 = 3, 4 = 6, 5 = 12. Gems
+  pile up in the light (safe) and erode in the dark, so piles self-limit at the light line.
 - **Code:** `climb-engine.js` (headless, deterministic, reuses `engine.js` helpers),
   `climb.js` + `climb.html` (front-end), climb ruleset/tools in `rules.js`, `drawClimb`
   in `render.js`. Tests: `node climb-selftest.js` (or `npm run climbtest`). Demo 1

@@ -6,7 +6,7 @@
    ===================================================================== */
 import { CLIMB_RULES, makeClimbRules } from './rules.js';
 import {
-  createClimbState, tickClimb, placeClimb, removeClimb, bombClimb, costOf, inBounds, EMPTY,
+  createClimbState, tickClimb, placeClimb, removeClimb, bombClimb, costOf, lightCeiling, inBounds, EMPTY,
 } from './climb-engine.js';
 import { drawClimb, computeLayout } from './render.js';
 
@@ -34,9 +34,10 @@ function newGame() {
   updateStats();
 }
 
-/* camera: keep the frontier ~4 rows below the top of the window, clamped to the shaft */
+/* camera: follow the light ceiling, clamped to the shaft. With rows == view the
+   whole shaft is on screen and this stays 0 (no scroll). */
 function camTopFor() {
-  const top = state.frontier - 4;
+  const top = lightCeiling(state) - 4;
   return Math.max(0, Math.min(rules.rows - rules.view, top));
 }
 
@@ -141,11 +142,11 @@ function draw() {
 
 /* HUD */
 function updateStats() {
-  document.getElementById('total').textContent = state.harvested.toLocaleString();
+  document.getElementById('total').textContent = state.energy.toLocaleString(); // spendable balance
   const counts = rules.tools.filter((t) => t.kind !== 'action')
     .map((t) => `${t.name.toLowerCase()} <b>${(state.pieces.get(t.id) || new Map()).size}</b>`).join(' · ');
   document.getElementById('stats').innerHTML =
-    `energy <b>${state.energy}</b> · lost <b>${state.lost}</b> · to source <b>${state.frontier}</b><br>${counts}`;
+    `harvested <b>${state.harvested}</b> · lost <b>${state.lost}</b> · to source <b>${lightCeiling(state)}</b><br>${counts}`;
   if (state.won) {
     const w = document.getElementById('win');
     document.getElementById('winsub').textContent = `${state.harvested} energy harvested, ${state.lost} lost to the dark.`;

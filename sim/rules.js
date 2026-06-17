@@ -133,19 +133,19 @@ export const CLIMB_TOOLS = [
 
 export const CLIMB_RULES = {
   cols: 9,
-  rows: 48,          // WORLD_ROWS — the predefined shaft height
+  rows: 20,          // WORLD_ROWS — the shaft height (fully visible: rows == view)
   ncol: 6,
-  baseReach: 4,      // lit rows above the floor at the start
-  lensReach: 4,      // rows a Lens relays light upward
-  // Gem life (fall-steps) must span the shaft: most gems die mid-fall (the
-  // "sporadic options" near Glitterdelve), a lucky minority survive to the
-  // starting frontier, and the rain gets denser the higher you climb.
-  lifeMin: 22,       // randomized gem life (fall-steps), inclusive range
-  lifeMax: 52,
-  initDensity: 0.45, // chance a cell is pre-filled at start
-  spawnDensity: 0.55,// chance the Source emits into an empty top cell each tick
+  baseReach: 4,      // lit rows above the floor at the start (ceiling starts at rows-baseReach)
+  lensReach: 4,      // rows a Lens relays light upward (chain ~4 lenses to reach the Source)
+  // Gem life (ticks-in-the-dark before breaking). Most gems die falling through
+  // the dark (the "sporadic options" near Glitterdelve); raising the light with
+  // lenses shrinks the dark, so more survive and pile up — the reason to climb.
+  lifeMin: 7,        // randomized gem life, inclusive range
+  lifeMax: 16,
+  initDensity: 0.4,  // chance a cell is pre-filled at start
+  spawnDensity: 0.5, // chance the Source emits into an empty top cell each tick
   startGrant: 9,     // starting energy
-  view: 14,          // rows visible in the camera window
+  view: 20,          // rows visible (== rows, so the whole shaft is on screen)
   costs: { bomb: 0, dam: 3, slope: 3, split: 6, swap: 6, amp: 9 },
   scoring: { 3: 3, 4: 6, 5: 12 }, // energy per lit run of N gems
   tickOrder: ['machines', 'resolve', 'gravity', 'spawn', 'resolve'], // informational

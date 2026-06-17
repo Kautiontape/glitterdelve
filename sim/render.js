@@ -8,7 +8,7 @@
    gallery thumbnails AND the full replay viewer, so the sim looks like the game.
    ===================================================================== */
 import { lightReach } from './engine.js';
-import { isLit as climbIsLit, litCeiling as climbLitCeiling } from './climb-engine.js';
+import { isLit as climbIsLit, lightCeiling as climbLightCeiling } from './climb-engine.js';
 
 // palette copied from demo.html's :root so render is self-contained
 const COLORS = ['#e0496b', '#3fb6d3', '#5dd36a', '#f2b134', '#9b6cf0', '#ec6fb0'];
@@ -177,17 +177,14 @@ export function drawClimb(ctx, state, rules, layout, camTop) {
   ctx.fillStyle = '#00000035';
   ctx.fillRect(ox - 4, oy - 4, cell * rules.cols + 8, cell * view + 8);
 
-  // light band (per column, including lens-extended ceiling)
-  for (let x = 0; x < rules.cols; x++) {
-    const ceil = climbLitCeiling(state, x);
-    for (let sy = 0; sy < view; sy++) {
-      const y = camTop + sy;
-      if (y < 0 || y >= rules.rows) continue;
-      if (y >= ceil) {
-        ctx.fillStyle = hexA(LIGHTC, y >= state.frontier ? 0.16 : 0.10); // base band brighter than relayed
-        ctx.fillRect(cxp(x), ryp(y), cell, cell);
-      }
-    }
+  // light band (full width up to the lens-raised ceiling; base band reads brighter)
+  const ceil = climbLightCeiling(state);
+  const base = rules.rows - rules.baseReach;
+  for (let sy = 0; sy < view; sy++) {
+    const y = camTop + sy;
+    if (y < 0 || y >= rules.rows || y < ceil) continue;
+    ctx.fillStyle = hexA(LIGHTC, y >= base ? 0.16 : 0.10);
+    ctx.fillRect(cxp(0), ryp(y), cell * rules.cols, cell);
   }
 
   // faint grid

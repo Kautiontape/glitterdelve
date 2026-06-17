@@ -24,9 +24,9 @@
   .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
   .stat{margin-left:auto;text-align:right;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
   .stat b{color:var(--ink);font-weight:600;}
-  .links{position:absolute;top:12px;right:12px;display:flex;gap:8px;z-index:3;}
+  .links{display:flex;gap:8px;pointer-events:auto;align-self:flex-start;}
   .links a,.gear{font-size:12px;color:var(--muted);text-decoration:none;border:1px solid var(--line);
-    background:color-mix(in srgb,var(--panel) 80%,transparent);border-radius:9px;padding:5px 9px;cursor:pointer;}
+    background:color-mix(in srgb,var(--panel) 80%,transparent);border-radius:9px;padding:5px 9px;cursor:pointer;white-space:nowrap;}
   .links a:hover,.gear:hover{color:var(--ink);}
   .toolbar{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;
     background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);
@@ -68,14 +68,13 @@
 <div class="topbar">
   <div class="card">
     <div class="total" id="total">0</div>
-    <div class="label">energy harvested</div>
+    <div class="label">energy</div>
   </div>
   <div class="card stat" id="stats"></div>
-</div>
-
-<div class="links">
-  <span class="gear" id="gear">⚙ rules</span>
-  <a href="./index.html">lab →</a>
+  <div class="links">
+    <span class="gear" id="gear">⚙ rules</span>
+    <a href="./index.html">lab →</a>
+  </div>
 </div>
 
 <div class="panel" id="panel">
