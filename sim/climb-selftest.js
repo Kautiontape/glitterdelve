@@ -41,5 +41,19 @@ console.log('Glitterdelve CLIMB self-test\n');
   ok('every gem has positive life', (() => { for (let y = 0; y < R.rows; y++) for (let x = 0; x < R.cols; x++) { if (s.grid[y][x] !== EMPTY && s.life[y][x] < 1) return false; } return true; })());
 }
 
+/* 3. frontier light: bottom band + a lens pushes the lit ceiling upward */
+{
+  const R = makeClimbRules();
+  const s = createClimbState(R, 1);
+  const x = 3, f = s.frontier;
+  ok('cell at the frontier is lit', isLit(s, x, f));
+  ok('cell one row above the frontier is dark', !isLit(s, x, f - 1));
+  approx('litCeiling equals the frontier with no lenses', litCeiling(s, x), f);
+  s.pieces.get('amp').set(x + ',' + f, true); // direct placement (placeClimb arrives in Task 7)
+  approx('lens raises the lit ceiling by lensReach', litCeiling(s, x), Math.max(0, f - R.lensReach));
+  ok('a cell within the lens relay is now lit', isLit(s, x, f - 1));
+  ok('a neighbouring column is unaffected', litCeiling(s, x + 1) === f);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -58,5 +58,36 @@ export function placeClimb() { throw new Error('not implemented'); }
 export function removeClimb() { throw new Error('not implemented'); }
 export function bombClimb() { throw new Error('not implemented'); }
 export function costOf() { throw new Error('not implemented'); }
-export function isLit() { throw new Error('not implemented'); }
-export function litCeiling() { throw new Error('not implemented'); }
+/* The topmost lit world row in column x. Starts at the frontier (rows >= frontier
+   are lit) and is pushed UP by any fed Lens (extendsLight) in the column. A lens
+   at seam s is "fed" when its lower cell (x,s) is already lit (s >= current ceil);
+   it then lights up to row s - reach. Iterates so lenses can chain. */
+export function litCeiling(state, x) {
+  const R = state.rules;
+  let ceil = state.frontier;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const t of state.rules.tools) {
+      const ext = t.extendsLight;
+      if (!ext) continue;
+      const m = state.pieces.get(t.id);
+      if (!m) continue;
+      const reach = ext.rule ? (R[ext.rule] || 0) : (ext.reach || 0);
+      for (const key of m.keys()) {
+        const ci = key.indexOf(',');
+        const lx = +key.slice(0, ci), ls = +key.slice(ci + 1);
+        if (lx !== x) continue;
+        if (ls >= ceil) {
+          const nc = Math.max(0, ls - reach);
+          if (nc < ceil) { ceil = nc; changed = true; }
+        }
+      }
+    }
+  }
+  return ceil;
+}
+export function isLit(state, x, y) {
+  if (!inBounds(state, x, y)) return false;
+  return y >= litCeiling(state, x);
+}
