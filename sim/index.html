@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glitterdelve — Simulation Lab</title>
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<style>
+  :root{
+    --bg:#0e0b16; --panel:#181226; --panel2:#1f1733; --ink:#e8e3f5; --muted:#8a82a8;
+    --line:#2a2140; --accent:#c9a227; --good:#5dd36a; --bad:#e0496b; --link:#9b6cf0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;}
+  a{color:var(--link);}
+  h1{font-size:20px;margin:0;letter-spacing:-.02em;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:18px 0 8px;}
+  header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;}
+  header .sub{color:var(--muted);font-size:12px;}
+  .wrap{display:grid;grid-template-columns:300px 1fr;gap:0;min-height:calc(100vh - 58px);}
+  .controls{border-right:1px solid var(--line);padding:16px 18px;background:var(--panel);position:sticky;top:0;align-self:start;}
+  .main{padding:16px 22px;min-width:0;}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px;}
+  input[type=number],input[type=text],select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;}
+  .row{display:flex;gap:8px;}
+  .row>div{flex:1;}
+  .strat{display:flex;align-items:center;gap:8px;padding:5px 7px;border-radius:7px;cursor:pointer;}
+  .strat:hover{background:#ffffff0a;}
+  .strat input{accent-color:var(--accent);}
+  .strat .nm{font-size:13px;}
+  .strat .nt{font-size:11px;color:var(--muted);}
+  button{background:var(--accent);color:#1a1206;border:none;border-radius:9px;padding:10px 14px;
+    font-weight:700;font-size:14px;cursor:pointer;width:100%;margin-top:14px;}
+  button:disabled{opacity:.5;cursor:default;}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:500;width:auto;margin:0;padding:6px 11px;}
+  .bar{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:10px;display:none;}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .1s;}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;}
+  th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--line);}
+  th:first-child,td:first-child{text-align:left;}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em;cursor:pointer;}
+  tr.best td{color:var(--good);}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;}
+  .thumb{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px;cursor:pointer;position:relative;}
+  .thumb:hover{border-color:var(--accent);}
+  .thumb canvas{width:100%;height:auto;display:block;border-radius:4px;}
+  .thumb .cap{font-size:10px;color:var(--muted);margin-top:4px;display:flex;justify-content:space-between;gap:4px;}
+  .thumb .pin{position:absolute;top:4px;right:6px;font-size:13px;opacity:.4;}
+  .thumb.pinned .pin{opacity:1;color:var(--accent);}
+  .group{margin-bottom:18px;}
+  .group .gh{display:flex;align-items:baseline;gap:10px;margin-bottom:8px;}
+  .group .gh b{font-size:14px;}
+  .group .gh span{font-size:12px;color:var(--muted);}
+  .muted{color:var(--muted);}
+  /* replay modal */
+  .modal{position:fixed;inset:0;background:#06040bcc;backdrop-filter:blur(4px);display:none;
+    align-items:center;justify-content:center;z-index:20;padding:20px;}
+  .modal.open{display:flex;}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;max-width:760px;width:100%;
+    max-height:94vh;overflow:auto;}
+  .sheet .top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px;}
+  .sheet canvas{display:block;margin:0 auto;background:var(--bg);border-radius:10px;max-width:100%;}
+  .scrub{display:flex;align-items:center;gap:10px;margin-top:12px;}
+  .scrub input[type=range]{flex:1;accent-color:var(--accent);}
+  .pills{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:10px;}
+  .pills b{color:var(--ink);}
+  .acts{font-size:12px;color:var(--muted);margin-top:8px;min-height:18px;}
+  .legend{font-size:11px;color:var(--muted);margin-top:6px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Glitterdelve · Simulation Lab</h1>
+  <span class="sub">run hundreds of games across strategies & rules · click any board to replay its decisions · <a href="./play.html">play the modular engine →</a> · <a href="../demo.html">original game →</a></span>
+</header>
+
+<div class="wrap">
+  <aside class="controls">
+    <h2 style="margin-top:0">Strategies</h2>
+    <div id="strats"></div>
+
+    <h2>Batch</h2>
+    <div class="row">
+      <div><label>Games / strategy</label><input type="number" id="games" value="60" min="1"></div>
+      <div><label>Ticks / game</label><input type="number" id="ticks" value="1200" min="1"></div>
+    </div>
+
+    <h2>Objective</h2>
+    <label>Preset</label>
+    <select id="preset"></select>
+    <label>Weights (costs negative)</label>
+    <input type="text" id="weights" value="collected=1">
+
+    <h2>Rules</h2>
+    <div class="row">
+      <div><label>cols</label><input type="number" id="r_cols" value="9"></div>
+      <div><label>rows</label><input type="number" id="r_rows" value="14"></div>
+    </div>
+    <div class="row">
+      <div><label>colors</label><input type="number" id="r_ncol" value="6"></div>
+      <div><label>baseReach</label><input type="number" id="r_baseReach" value="4"></div>
+    </div>
+    <div class="row">
+      <div><label>anchor</label><input type="number" id="r_anchor" value="4"></div>
+      <div><label>ampReach</label><input type="number" id="r_ampReach" value="4"></div>
+    </div>
+
+    <button id="run">Run simulations</button>
+    <div class="bar" id="bar"><i></i></div>
+    <div class="legend" id="status"></div>
+
+    <h2 style="margin-top:22px">Optimize a build</h2>
+    <div class="legend" style="margin:0 0 6px">Search for the best static layout (no cutting), averaged with common random numbers.</div>
+    <label>Method</label>
+    <select id="o_method">
+      <option value="pattern" selected>pattern (dense full-board, lights 9/9)</option>
+      <option value="all">all (compare every method)</option>
+      <option value="greedy">greedy + beam (sparse)</option>
+      <option value="sa">simulated annealing</option>
+      <option value="ga">genetic algorithm</option>
+    </select>
+    <div class="row">
+      <div><label>ticks / run</label><input type="number" id="o_ticks" value="800"></div>
+      <div><label>seeds</label><input type="number" id="o_seeds" value="10"></div>
+    </div>
+    <div class="row">
+      <div><label>col span</label><input type="number" id="o_colspan" value="2"></div>
+      <div><label>max pieces</label><input type="number" id="o_maxpieces" value="8"></div>
+    </div>
+    <button id="optRun">Optimize build</button>
+    <div class="bar" id="optBar"><i></i></div>
+    <div class="legend" id="optStatus"></div>
+  </aside>
+
+  <main class="main">
+    <div id="optResultWrap" style="display:none">
+      <h2>Optimized build</h2>
+      <div id="optResult"></div>
+    </div>
+
+    <h2>Results</h2>
+    <div id="results"><p class="muted">Pick strategies and press <b>Run simulations</b>.</p></div>
+
+    <div id="pinnedWrap" style="display:none">
+      <h2>Noted games <span class="muted" id="pinClear" style="cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px;">(clear)</span></h2>
+      <div class="gallery" id="pinned"></div>
+    </div>
+
+    <h2>Final boards</h2>
+    <div id="gallery"><p class="muted">Each game's final board appears here — click to replay.</p></div>
+  </main>
+</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <div class="top">
+      <div><b id="m_title"></b> <span class="muted" id="m_seed"></span></div>
+      <button class="ghost" id="m_close">close</button>
+    </div>
+    <canvas id="m_canvas" width="480" height="640"></canvas>
+    <div class="scrub">
+      <button class="ghost" id="m_play">▶ play</button>
+      <input type="range" id="m_range" min="0" max="100" value="0">
+      <span class="muted" id="m_tick" style="min-width:90px;text-align:right;"></span>
+    </div>
+    <div class="pills" id="m_pills"></div>
+    <div class="acts" id="m_acts"></div>
+    <div class="legend">white outline = a Cut this tick · dot = a piece placed · ▬ Wall · ≣ Lens · ⇄ Sorter · ⋔ Fork</div>
+    <button class="ghost" id="m_pin" style="margin-top:12px">☆ note this game</button>
+  </div>
+</div>
+
+<script type="module" src="./ui.js"></script>
+</body>
+</html>

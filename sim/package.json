@@ -1,0 +1,11 @@
+{
+  "name": "glitterdelve-sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless, ruleset-driven simulation harness for Glitterdelve (CLI + web viewer).",
+  "scripts": {
+    "test": "node selftest.js",
+    "sim": "node cli.js"
+  }
+}
