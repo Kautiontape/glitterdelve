@@ -136,5 +136,56 @@ console.log('Glitterdelve CLIMB self-test\n');
   ok('gem passed through the broken lens', s3.grid[11][4] === 0);
 }
 
+/* 6. resolve: a lit run scores per the table, awards energy, raises the frontier;
+      a dark run clears but scores nothing; reaching the top wins */
+{
+  const R = makeClimbRules();
+  const s = createClimbState(R, 1);
+  const y = R.rows - 2; // inside the lit band (>= frontier)
+  for (let x = 0; x < R.cols; x++) { s.grid[y][x] = EMPTY; s.life[y][x] = 0; }
+  s.grid[y][2] = 0; s.grid[y][3] = 0; s.grid[y][4] = 0; // a lit horizontal triple
+  for (const x of [2, 3, 4]) s.life[y][x] = 9;
+  const f0 = s.frontier, e0 = s.energy, h0 = s.harvested;
+  const changed = resolveClimb(s);
+  ok('resolve reports a change', changed === true);
+  ok('lit triple cleared', s.grid[y][2] === EMPTY && s.grid[y][4] === EMPTY);
+  approx('triple awards 3 energy', s.harvested, h0 + 3);
+  approx('energy balance grows by the award', s.energy, e0 + 3);
+  approx('frontier rose by one row', s.frontier, f0 - 1);
+
+  // a quad scores 6, a quint scores 12
+  const sq = createClimbState(R, 1);
+  const yy = R.rows - 2;
+  for (let x = 0; x < R.cols; x++) { sq.grid[yy][x] = EMPTY; sq.life[yy][x] = 0; }
+  for (const x of [1, 2, 3, 4]) { sq.grid[yy][x] = 1; sq.life[yy][x] = 9; }
+  const hq = sq.harvested; resolveClimb(sq);
+  approx('quad awards 6 energy', sq.harvested, hq + 6);
+  const s5 = createClimbState(R, 1);
+  for (let x = 0; x < R.cols; x++) { s5.grid[yy][x] = EMPTY; s5.life[yy][x] = 0; }
+  for (const x of [1, 2, 3, 4, 5]) { s5.grid[yy][x] = 2; s5.life[yy][x] = 9; }
+  const h5 = s5.harvested; resolveClimb(s5);
+  approx('quint awards 12 energy', s5.harvested, h5 + 12);
+
+  // a dark run (above the lit ceiling) clears but scores nothing
+  const sd = createClimbState(R, 1);
+  const dy = 2; // near the top, well above the frontier => dark
+  for (let x = 0; x < R.cols; x++) { sd.grid[dy][x] = EMPTY; sd.life[dy][x] = 0; }
+  for (const x of [2, 3, 4]) { sd.grid[dy][x] = 3; sd.life[dy][x] = 9; }
+  const hd = sd.harvested, fd = sd.frontier;
+  resolveClimb(sd);
+  ok('dark run clears', sd.grid[dy][2] === EMPTY);
+  approx('dark run scores no energy', sd.harvested, hd);
+  approx('dark run does not raise the frontier', sd.frontier, fd);
+
+  // reaching the top wins
+  const sw = createClimbState(R, 1);
+  sw.frontier = 1;
+  const wy = R.rows - 2;
+  for (let x = 0; x < R.cols; x++) { sw.grid[wy][x] = EMPTY; sw.life[wy][x] = 0; }
+  for (const x of [2, 3, 4]) { sw.grid[wy][x] = 4; sw.life[wy][x] = 9; }
+  resolveClimb(sw);
+  ok('frontier hit 0 sets won', sw.frontier === 0 && sw.won === true);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

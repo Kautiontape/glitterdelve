@@ -128,7 +128,68 @@ export function stepGravityClimb(state) {
     }
   }
 }
-export function resolveClimb() { throw new Error('not implemented'); }
+/* energy for a lit run of n gems, from rules.scoring; runs beyond the table
+   extrapolate from the top entry (+5 per extra gem). */
+function payout(state, n) {
+  const sc = state.rules.scoring || { 3: 3, 4: 6, 5: 12 };
+  if (n < 3) return 0;
+  if (sc[n] != null) return sc[n];
+  return 12 + (n - 5) * 5;
+}
+
+/* Clear every maximal horizontal/vertical run of length >= 3. A run with >= 3
+   LIT cells harvests energy (payout by lit length) and raises the frontier one
+   row; dark runs clear for hygiene but score nothing. Cells shared by an H and a
+   V run clear once but score in both (a cross bonus). */
+export function resolveClimb(state) {
+  const R = state.rules, g = state.grid;
+  const clear = new Set();
+  let energy = 0, litRuns = 0;
+
+  for (let y = 0; y < R.rows; y++) {
+    let x = 0;
+    while (x < R.cols) {
+      const c = g[y][x];
+      if (c === EMPTY) { x++; continue; }
+      let xe = x; while (xe + 1 < R.cols && g[y][xe + 1] === c) xe++;
+      if (xe - x + 1 >= 3) {
+        let litLen = 0;
+        for (let i = x; i <= xe; i++) { clear.add(i + ',' + y); if (isLit(state, i, y)) litLen++; }
+        if (litLen >= 3) { energy += payout(state, litLen); litRuns++; }
+      }
+      x = xe + 1;
+    }
+  }
+  for (let x = 0; x < R.cols; x++) {
+    let y = 0;
+    while (y < R.rows) {
+      const c = g[y][x];
+      if (c === EMPTY) { y++; continue; }
+      let ye = y; while (ye + 1 < R.rows && g[ye + 1][x] === c) ye++;
+      if (ye - y + 1 >= 3) {
+        let litLen = 0;
+        for (let j = y; j <= ye; j++) { clear.add(x + ',' + j); if (isLit(state, x, j)) litLen++; }
+        if (litLen >= 3) { energy += payout(state, litLen); litRuns++; }
+      }
+      y = ye + 1;
+    }
+  }
+
+  if (clear.size === 0) return false;
+  for (const k of clear) {
+    const ci = k.indexOf(',');
+    const x = +k.slice(0, ci), y = +k.slice(ci + 1);
+    if (state.events) state.events.popping.push({ x, y, lit: isLit(state, x, y) });
+    clearGem(state, x, y);
+  }
+  if (energy > 0) {
+    state.harvested += energy;
+    state.energy += energy;
+    state.frontier = Math.max(0, state.frontier - litRuns);
+    if (state.frontier === 0) state.won = true;
+  }
+  return true;
+}
 export function stepSwappersClimb() { throw new Error('not implemented'); }
 export function stepSpawnClimb() { throw new Error('not implemented'); }
 export function placeClimb() { throw new Error('not implemented'); }
