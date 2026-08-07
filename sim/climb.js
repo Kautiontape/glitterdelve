@@ -1,44 +1,43 @@
 /* =====================================================================
    GLITTERDELVE — THE CLIMB (demo 2), browser front-end on climb-engine.
-   Pure builder: deploy structures to route falling, decaying gems into the
-   rising light. Camera follows the frontier up a tall shaft to the Source.
-   Ruleset is read from the URL so a tweaked game is shareable/bookmarkable.
+   Pure builder: deploy a routing machine (ramps, sorters, conveyors, walls)
+   that herds like colours into the lit columns so they pile and pop; raise the
+   safe light with lenses toward the Source. Placement is single-click (no drag),
+   with a ghost preview and dots that mark the buildable, lit zone.
+   Ruleset is read from the URL so a tweaked game is shareable.
    ===================================================================== */
 import { CLIMB_RULES, makeClimbRules } from './rules.js';
 import {
-  createClimbState, tickClimb, placeClimb, removeClimb, bombClimb, costOf, lightCeiling, inBounds, EMPTY,
+  createClimbState, tickClimb, placeClimb, removeClimb, adjustClimb, bombClimb,
+  costOf, litColumns, comboMult, lensSpot, inBounds, EMPTY,
 } from './climb-engine.js';
 import { drawClimb, computeLayout } from './render.js';
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d'), stage = document.getElementById('stage');
 
-const RULE_KEYS = ['cols', 'rows', 'baseReach', 'lensReach', 'lifeMin', 'lifeMax'];
+const RULE_KEYS = ['cols', 'rows', 'baseReach', 'dimBand', 'lensReach', 'spawnDensity'];
 function readOverridesFromURL() {
   const q = new URLSearchParams(location.search), o = {};
-  for (const k of RULE_KEYS) if (q.has(k)) o[k] = parseInt(q.get(k), 10);
+  for (const k of RULE_KEYS) if (q.has(k)) o[k] = k === 'spawnDensity' ? parseFloat(q.get(k)) : parseInt(q.get(k), 10);
   return o;
 }
 let overrides = readOverridesFromURL();
 let seed = parseInt(new URLSearchParams(location.search).get('seed') || '1', 10) || 1;
-let TICK = parseInt(new URLSearchParams(location.search).get('tick') || '220', 10) || 220;
+let TICK = parseInt(new URLSearchParams(location.search).get('tick') || '0', 10) || CLIMB_RULES.tickMs;
 
-let rules, state, layout = { cell: 40, ox: 0, oy: 0 }, camTop = 0, paused = false;
+let rules, state, layout = { cell: 40, ox: 0, oy: 0 }, paused = false;
+let tool = 'sorter';
+let hover = null;            // {kind:'cell'|'seam', x, y}
+const particles = [];
 
 function newGame() {
   rules = makeClimbRules(overrides);
   state = createClimbState(rules, seed, { record: true });
-  camTop = camTopFor();
+  particles.length = 0;
   resize();
   buildToolbar();
   document.getElementById('win').classList.remove('show');
   updateStats();
-}
-
-/* camera: follow the light ceiling, clamped to the shaft. With rows == view the
-   whole shaft is on screen and this stays 0 (no scroll). */
-function camTopFor() {
-  const top = lightCeiling(state) - 4;
-  return Math.max(0, Math.min(rules.rows - rules.view, top));
 }
 
 function resize() {
@@ -46,18 +45,22 @@ function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   cv.width = w * dpr | 0; cv.height = h * dpr | 0;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // size cells to the VIEW window height, not the whole shaft
-  layout = computeLayout(w, h, { cols: rules.cols, rows: rules.view }, { pad: 16, top: 64 });
+  layout = computeLayout(w, h, { cols: rules.cols, rows: rules.rows }, { pad: 16, top: 64 });
 }
 addEventListener('resize', resize);
 
-const cornerX = (px) => Math.round((px - layout.ox) / layout.cell);
-const cornerY = (py) => camTop + Math.round((py - layout.oy) / layout.cell);
+/* screen px -> grid coords (no camera; the whole shaft is on screen) */
 const cellAtX = (px) => Math.floor((px - layout.ox) / layout.cell);
-const cellAtY = (py) => camTop + Math.floor((py - layout.oy) / layout.cell);
+const cellAtY = (py) => Math.floor((py - layout.oy) / layout.cell);
+/* nearest horizontal seam row for a click (top or bottom edge of the hovered cell) */
+function seamAt(px, py) {
+  const x = cellAtX(px);
+  const f = (py - layout.oy) / layout.cell;
+  const y = (f - Math.floor(f)) < 0.5 ? Math.floor(f) : Math.floor(f) + 1;
+  return { x, y };
+}
 
-/* toolbar built from the registry; shows costs */
-let tool = 'bomb';
+/* ---- toolbar ---- */
 function buildToolbar() {
   const bar = document.getElementById('toolbar');
   bar.innerHTML = '';
@@ -75,121 +78,163 @@ function buildToolbar() {
     bar.appendChild(el);
   }
 }
+function toolDef(id) { return rules.tools.find((t) => t.id === id); }
 
-/* place/remove with toggle + cost feedback */
-function tryPlace(toolId, pos) {
-  const m = state.pieces.get(toolId);
-  const tdef = rules.tools.find((t) => t.id === toolId);
-  const key = pos.x + ',' + pos.y;
-  if (tdef.seam === 'cell' && tdef.divert) {
-    const ex = m.get(key);
-    if (ex && ex.dir === (pos.dir || 1)) { removeClimb(state, toolId, pos); }
-    else { if (ex) removeClimb(state, toolId, pos); if (!placeClimb(state, toolId, pos)) flashHint('Not enough energy'); }
-  } else if (m.has(key)) {
-    removeClimb(state, toolId, pos);
-  } else if (!placeClimb(state, toolId, pos)) {
-    flashHint('Not enough energy');
+/* ---- placement helpers ---- */
+function cellPieceAt(x, y) { // any wedge/conveyor occupying a cell
+  for (const t of rules.tools) {
+    if (t.seam !== 'cell') continue;
+    const m = state.pieces.get(t.id);
+    if (m && m.has(x + ',' + y)) return t.id;
+  }
+  return null;
+}
+function seamPieceAt(x, y) { // any wall/lens on a seam
+  for (const t of rules.tools) {
+    if (t.seam !== 'horizontal') continue;
+    const m = state.pieces.get(t.id);
+    if (m && m.has(x + ',' + y)) return t.id;
+  }
+  return null;
+}
+
+function leftClick(px, py) {
+  const t = toolDef(tool);
+  if (t.kind === 'action') { // Bomb
+    const x = cellAtX(px), y = cellAtY(py);
+    if (inBounds(state, x, y)) bombClimb(state, x, y);
+  } else if (t.seam === 'cell') {
+    const x = cellAtX(px), y = cellAtY(py);
+    if (!inBounds(state, x, y)) return;
+    const here = cellPieceAt(x, y);
+    if (here === tool) adjustClimb(state, tool, { x, y });           // cycle in place
+    else if (here) flashHint('Another piece is here — right-click to remove it');
+    else if (!placeClimb(state, tool, { x, y, dir: 1, tc: 0 })) flashHint(affordMsg(tool, x, y));
+  } else if (t.extendsLight) { // Lens — snaps to the column's bright edge (the rung)
+    const x = cellAtX(px);
+    if (x < 0 || x >= rules.cols) return;
+    const y = lensSpot(state, x);
+    if (y < 1) { flashHint('This column already reaches the Source.'); return; }
+    if (!placeClimb(state, tool, { x, y })) flashHint(affordMsg(tool, x, y));
+  } else if (t.seam === 'horizontal') {
+    const { x, y } = seamAt(px, py);
+    if (seamPieceAt(x, y) === tool) { flashHint('Already here — right-click to remove'); return; }
+    if (!placeClimb(state, tool, { x, y })) flashHint(affordMsg(tool, x, y));
   }
   updateStats();
 }
-function placeFromCorners(a, b) {
-  const tdef = rules.tools.find((t) => t.id === tool);
-  const dx = b.cx - a.cx, dy = b.cy - a.cy;
-  if (Math.abs(dx) + Math.abs(dy) !== 1) return;
-  if (tdef.seam === 'horizontal' && Math.abs(dx) === 1) {
-    const x = Math.min(a.cx, b.cx), y = a.cy;
-    if (x >= 0 && x < rules.cols && y >= 1 && y < rules.rows) tryPlace(tool, { x, y });
-  } else if (tdef.seam === 'vertical' && Math.abs(dy) === 1) {
-    const x = a.cx, y = Math.min(a.cy, b.cy);
-    if (x >= 1 && x < rules.cols && y >= 0 && y < rules.rows) tryPlace(tool, { x, y });
+function rightClick(px, py) { // remove + refund whatever is under the cursor
+  const cx = cellAtX(px), cy = cellAtY(py);
+  const cp = cellPieceAt(cx, cy);
+  if (cp) { removeClimb(state, cp, { x: cx, y: cy }); updateStats(); return; }
+  const s = seamAt(px, py);
+  for (const sy of [s.y, s.y - 1, s.y + 1]) {
+    const sp = seamPieceAt(s.x, sy);
+    if (sp) { removeClimb(state, sp, { x: s.x, y: sy }); updateStats(); return; }
   }
 }
+function affordMsg(toolId, x, y) {
+  if (state.energy < costOf(state, toolId)) return 'Not enough energy';
+  return 'Build only in the lit zone (the dots)';
+}
 
-/* input */
-let drag = null;
+/* ---- input (single click; no drag) ---- */
 stage.addEventListener('contextmenu', (e) => e.preventDefault());
 stage.addEventListener('pointerdown', (e) => {
-  if (e.button > 0) return;
-  stage.setPointerCapture(e.pointerId);
-  const tdef = rules.tools.find((t) => t.id === tool);
-  if (tdef.kind === 'action') { // Bomb: instant on the clicked cell
-    const x = cellAtX(e.clientX), y = cellAtY(e.clientY);
-    if (inBounds(state, x, y)) { bombClimb(state, x, y); updateStats(); }
-  } else if (tdef.seam === 'cell') { // Slope/Splitter: click + drag for direction
-    drag = { mode: 'cell', x: cellAtX(e.clientX), y: cellAtY(e.clientY), sx: e.clientX, px: e.clientX, py: e.clientY };
-  } else { // seam tools: corner -> corner drag
-    drag = { mode: 'seam', a: { cx: cornerX(e.clientX), cy: cornerY(e.clientY) }, px: e.clientX, py: e.clientY };
-  }
+  if (e.button === 2) { rightClick(e.clientX, e.clientY); return; }
+  if (e.button !== 0) return;
+  leftClick(e.clientX, e.clientY);
 });
-stage.addEventListener('pointermove', (e) => { if (drag) { drag.px = e.clientX; drag.py = e.clientY; } });
-stage.addEventListener('pointerup', (e) => {
-  if (drag && drag.mode === 'seam') {
-    placeFromCorners(drag.a, { cx: cornerX(e.clientX), cy: cornerY(e.clientY) });
-  } else if (drag && drag.mode === 'cell') {
-    if (inBounds(state, drag.x, drag.y)) {
-      const dir = (e.clientX - drag.sx) < 0 ? -1 : 1;
-      tryPlace(tool, { x: drag.x, y: drag.y, dir });
+stage.addEventListener('pointermove', (e) => {
+  const t = toolDef(tool);
+  if (t.seam === 'horizontal') hover = { kind: 'seam', ...seamAt(e.clientX, e.clientY) };
+  else hover = { kind: 'cell', x: cellAtX(e.clientX), y: cellAtY(e.clientY) };
+});
+stage.addEventListener('pointerleave', () => { hover = null; });
+
+/* ---- particles (juice): sparkles on a lit pop, puffs on a dim shatter ---- */
+function spawnParticles() {
+  if (!state.events) return;
+  const { cell, ox, oy } = layout;
+  for (const p of state.events.popping) {
+    if (!p.lit) continue;
+    const sx = ox + p.x * cell + cell / 2, sy = oy + p.y * cell + cell / 2;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      particles.push({ x: sx, y: sy, vx: Math.cos(a) * (1 + i % 2), vy: Math.sin(a) * (1 + i % 2) - 0.5, life: 1, c: '255,238,168' });
     }
   }
-  drag = null;
-});
-
-/* render */
-function draw() {
-  camTop = camTopFor();
-  drawClimb(ctx, state, rules, layout, camTop);
+  for (const b of state.events.broke) {
+    const sx = ox + b.x * cell + cell / 2, sy = oy + b.y * cell + cell / 2;
+    if (b.lens) { // a gem smashed a lens — bright yellow shards so you SEE it break
+      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; particles.push({ x: sx, y: sy, vx: Math.cos(a) * 2.2, vy: Math.sin(a) * 2.2, life: 1, c: '255,225,77' }); }
+      flashHint('A gem smashed your lens — divert the rain off that column to protect it.');
+      continue;
+    }
+    for (let i = 0; i < 4; i++) particles.push({ x: sx, y: sy, vx: (Math.random() - 0.5) * 1.5, vy: -Math.random() * 1.2, life: 1, c: '150,140,170' });
+  }
 }
-
-/* HUD */
-function updateStats() {
-  document.getElementById('total').textContent = state.energy.toLocaleString(); // spendable balance
-  const counts = rules.tools.filter((t) => t.kind !== 'action')
-    .map((t) => `${t.name.toLowerCase()} <b>${(state.pieces.get(t.id) || new Map()).size}</b>`).join(' · ');
-  document.getElementById('stats').innerHTML =
-    `harvested <b>${state.harvested}</b> · lost <b>${state.lost}</b> · to source <b>${lightCeiling(state)}</b><br>${counts}`;
-  if (state.won) {
-    const w = document.getElementById('win');
-    document.getElementById('winsub').textContent = `${state.harvested} energy harvested, ${state.lost} lost to the dark.`;
-    w.classList.add('show');
+function drawParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt * 0.06; p.y += p.vy * dt * 0.06; p.vy += dt * 0.004; p.life -= dt * 0.0022;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.fillStyle = `rgba(${p.c},${p.life})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, layout.cell * 0.08 * p.life), 0, Math.PI * 2); ctx.fill();
   }
 }
 
-/* hint */
+/* ---- HUD ---- */
+function updateStats() {
+  document.getElementById('total').textContent = state.energy.toLocaleString();
+  const mult = comboMult(state);
+  const counts = rules.tools.filter((t) => t.kind !== 'action')
+    .map((t) => `${t.name.toLowerCase()} <b>${(state.pieces.get(t.id) || new Map()).size}</b>`).join(' · ');
+  const spree = mult > 1 ? ` · <span style="color:#ffd24a">spree ×${mult}</span>` : '';
+  document.getElementById('stats').innerHTML =
+    `harvested <b>${state.harvested}</b> · lost <b>${state.lost}</b> · shaft lit <b>${litColumns(state)}/${rules.cols}</b>${spree}<br>${counts}`;
+  if (state.won) {
+    document.getElementById('winsub').textContent = `${state.harvested} energy harvested, ${state.lost} lost to the dark.`;
+    document.getElementById('win').classList.add('show');
+  }
+}
+
+/* ---- hints ---- */
 let hintTimer;
 function showHint() {
   const msgs = {
-    bomb: 'Bomb: click a gem to destroy it. Free — for clearing jams and mistakes.',
-    dam: 'Wall: drag along a horizontal grid line. Gems pile on top — hold them in the light to match.',
-    slope: 'Slope: click a cell, drag left/right to aim. Pushes EVERY gem that way.',
-    split: 'Splitter: click a cell, drag left/right. Pushes every OTHER gem aside.',
-    swap: 'Swapper: drag along a vertical grid line. Swaps two gems when it makes a match — your matcher.',
-    amp: 'Lens: drag along a horizontal grid line. Relays light upward, but a gem hitting it breaks it.',
+    bomb: 'Bomb (free): left-click a gem to destroy it. Clears jams and mistakes.',
+    dam: 'Wall: left-click a horizontal grid line. Gems pile on top — match them in the light.',
+    ramp: 'Ramp: left-click a cell to drop it; click it again to flip. Gems slide one column off it.',
+    sorter: 'Sorter: left-click a cell; click it again to cycle its colour. That colour goes one way, the rest the other — build colour lanes.',
+    conveyor: 'Conveyor: left-click a cell; click again to flip. Carries resting gems sideways into a column.',
+    amp: 'Lens: left-click a column at its glowing rung to raise that column\'s light a few rows. Chain rung by rung up to the Source to win.',
   };
   flashHint(msgs[tool] || tool);
 }
 function flashHint(text) {
   const h = document.getElementById('hint');
   h.textContent = text; h.style.opacity = '1';
-  clearTimeout(hintTimer); hintTimer = setTimeout(() => { h.style.opacity = '0'; }, 3200);
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => { h.style.opacity = '0'; }, 3600);
 }
 
-/* rules panel */
+/* ---- rules panel ---- */
 const panel = document.getElementById('panel');
 document.getElementById('gear').onclick = () => { syncPanel(); panel.classList.toggle('open'); };
 function syncPanel() {
-  for (const k of RULE_KEYS) document.getElementById('r_' + k).value = (overrides[k] != null ? overrides[k] : CLIMB_RULES[k]);
+  for (const k of RULE_KEYS) { const el = document.getElementById('r_' + k); if (el) el.value = (overrides[k] != null ? overrides[k] : CLIMB_RULES[k]); }
   document.getElementById('r_seed').value = seed;
   document.getElementById('r_tick').value = TICK;
 }
 document.getElementById('restart').onclick = () => {
   overrides = {};
-  for (const k of RULE_KEYS) { const v = parseInt(document.getElementById('r_' + k).value, 10); if (Number.isFinite(v)) overrides[k] = v; }
+  for (const k of RULE_KEYS) { const el = document.getElementById('r_' + k); if (!el) continue; const v = k === 'spawnDensity' ? parseFloat(el.value) : parseInt(el.value, 10); if (Number.isFinite(v)) overrides[k] = v; }
   seed = parseInt(document.getElementById('r_seed').value, 10) || 1;
-  TICK = Math.max(20, parseInt(document.getElementById('r_tick').value, 10) || 220);
+  TICK = Math.max(60, parseInt(document.getElementById('r_tick').value, 10) || CLIMB_RULES.tickMs);
   const q = new URLSearchParams();
   for (const k of RULE_KEYS) if (overrides[k] !== undefined && overrides[k] !== CLIMB_RULES[k]) q.set(k, overrides[k]);
   if (seed !== 1) q.set('seed', seed);
-  if (TICK !== 220) q.set('tick', TICK);
+  if (TICK !== CLIMB_RULES.tickMs) q.set('tick', TICK);
   history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : ''));
   panel.classList.remove('open');
   newGame();
@@ -197,20 +242,21 @@ document.getElementById('restart').onclick = () => {
 const pauseBtn = document.getElementById('pause');
 pauseBtn.onclick = () => { paused = !paused; pauseBtn.textContent = paused ? 'Resume' : 'Pause'; };
 
-/* main loop */
+/* ---- main loop ---- */
 let acc = 0, last = performance.now();
 function frame(now) {
-  acc += now - last; last = now;
+  const dt = now - last; acc += dt; last = now;
   let ticked = false;
-  if (!paused && !state.won) { while (acc >= TICK) { tickClimb(state); acc -= TICK; ticked = true; } }
+  if (!paused && !state.won) { while (acc >= TICK) { tickClimb(state); spawnParticles(); acc -= TICK; ticked = true; } }
   else acc = 0;
-  draw();
-  if (ticked) updateStats();
+  drawClimb(ctx, state, rules, layout, { tool, hover, dir: 1 });
+  drawParticles(dt);
+  if (ticked || (state.won && !document.getElementById('win').classList.contains('show'))) updateStats();
   requestAnimationFrame(frame);
 }
 newGame();
 showHint();
 requestAnimationFrame((n) => { last = n; requestAnimationFrame(frame); });
 
-// expose live state + engine ops for console tinkering and harness checks (lab tool)
-window.__climb = { get state() { return state; }, get rules() { return rules; }, placeClimb, tickClimb, bombClimb };
+// expose live state + engine ops for console tinkering and harness checks
+window.__climb = { get state() { return state; }, get rules() { return rules; }, placeClimb, tickClimb, bombClimb, removeClimb, adjustClimb };

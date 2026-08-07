@@ -183,24 +183,42 @@ anchor emits, never the mechanics).
 
 ## The Climb (demo 2)
 
-A second, inverted demo built on the same engine primitives. Glitterdelve sits at
-the **bottom** with a light band above it; gems rain down and **decay only in the
-dark** (one life per tick), so few survive the drop — the harvest is sporadic. You're
-the Wall Organizer: a **pure builder** (no manual Cut) who deploys structures to make
-matches, and **raises the light with lenses**. Lifting the light keeps more gems alive
-and lets them **pile up safely** to be matched; push the light all the way to the
-Source (the top) to win.
+A second, inverted demo built on the same engine primitives. Glitterdelve glows at
+the **bottom**; gems rain from an invisible **Source** far above. You're a **pure
+builder** with no manual matcher — **matches emerge from routing.** You place ramps,
+colour sorters, conveyors and walls that herd like colours into a lit column until
+they pile 3+ and pop, then **raise the safe light with lenses** toward the Source.
+
+**Three-tier light, per column.** Each column has its own light height:
+- **bright** (base band + that column's fed lenses) — gems are **safe** and matches
+  **score** here; bright gems glow "prime";
+- **dim** (a few rows above bright) — **buildable**, visible, resting gems decay;
+- **dark** (above dim) — **invisible**; gems fall/rest and decay unseen.
+
+**Decay is a settle beat:** falling gems never decay, and Glitterdelve **absorbs**
+overflow at the base (columns cap at the brim of the light instead of flooding into
+death), so the base is calm and self-clearing — the lively base spree is your income.
+The active goal is the **climb**: raise the light with lenses, one column at a time,
+until the **whole shaft** is lit to the Source (a snowball — more light means more of
+the board pops, which funds more climbing). Losses only happen if you park gems unlit
+on a raised structure.
 
 - **Play:** serve the repo root and open `sim/climb.html` (`python3 -m http.server 8777`
   from the repo root, then `http://localhost:8777/sim/climb.html`). Ruleset lives in the
-  URL (`?rows=24&seed=3&...`). Live state is on `window.__climb` for console tinkering.
-- **Tools:** Bomb (free, destroy a gem), Wall (3, blocks fall), Slope (3, diverts every
-  gem), Splitter (6, diverts every other), Swapper (6, swap-on-match — your matcher),
-  Lens (9, raises the light a few rows but breaks when a gem hits it — protect it).
-- **Economy:** one currency — the headline is your **spendable** energy (what builds cost);
-  `harvested` is the running total. Scoring is super-linear: 3 = 3, 4 = 6, 5 = 12. Gems
-  pile up in the light (safe) and erode in the dark, so piles self-limit at the light line.
+  URL (`?rows=16&seed=3&...`). Live state is on `window.__climb` for console tinkering.
+- **Controls (no dragging):** select a tool, **left-click** to place (dots show where —
+  only in the lit, buildable zone), **left-click a placed piece** to flip it (sorter
+  cycles its target colour), **right-click** to remove it (full refund).
+- **Tools:** Bomb (free, destroy a gem), Wall (2, gems pile on top), Ramp (2, solid
+  wedge — slides a gem one column as it falls; chains into staircases), Sorter (5, a
+  colour **filter**: the target colour drops straight through into a lane, every other
+  colour is kicked aside), Conveyor (3, carries a resting gem sideways), Lens (8, a
+  sturdy relay that raises **one column's** light a few rows — click a column at its
+  glowing rung and chain up to the Source).
+- **Economy:** **spendable** energy funds builds; `harvested` is the running total.
+  Scoring is super-linear (3 = 4, 4 = 10, 5 = 24, +8/extra) and a **spree multiplier**
+  builds while you keep popping each tick (×1 → ×5). Only **bright** runs score.
 - **Code:** `climb-engine.js` (headless, deterministic, reuses `engine.js` helpers),
   `climb.js` + `climb.html` (front-end), climb ruleset/tools in `rules.js`, `drawClimb`
-  in `render.js`. Tests: `node climb-selftest.js` (or `npm run climbtest`). Demo 1
-  (`engine.js`/`demo.html`) is untouched.
+  in `render.js`. Tests: `node climb-selftest.js` (or `npm run climbtest`); balance
+  probe: `node climb-balance.js`. Demo 1 (`engine.js`/`demo.html`) is untouched.

@@ -8,12 +8,14 @@
    gallery thumbnails AND the full replay viewer, so the sim looks like the game.
    ===================================================================== */
 import { lightReach } from './engine.js';
-import { isLit as climbIsLit, lightCeiling as climbLightCeiling } from './climb-engine.js';
+import { brightCeiling, dimCeiling, isBright, crackStage } from './climb-engine.js';
 
 // palette copied from demo.html's :root so render is self-contained
 const COLORS = ['#e0496b', '#3fb6d3', '#5dd36a', '#f2b134', '#9b6cf0', '#ec6fb0'];
 const DAMC = '#c9a227', SWAPC = '#5fe0d0', SPLITC = '#ff8a4c', AMPC = '#ffe14d', LIGHTC = '#fff2a8';
 const SLOPEC = '#7fd49a';
+// climb piece palette
+const RAMPC = '#7fd49a', SORTERC = '#c08bff', CONVC = '#5fb8e0';
 const EMPTY = -1;
 
 export function computeLayout(w, h, rules, opts = {}) {
@@ -162,121 +164,248 @@ function drawActions(ctx, actions, rules, layout) {
 }
 
 /* =====================================================================
-   CLIMB RENDER (demo 2). Draws a VIEW-row window of the tall shaft at world
-   offset camTop: the rising light band, decaying gems (dim in the dark, faint
-   when dying), the Glitterdelve floor, the Source, and the climb pieces.
+   CLIMB RENDER (demo 2). The whole shaft is on screen (rows == view, no scroll).
+   Per-column three-tier light: bright (warm, gems glow "prime"), dim (hazy,
+   buildable, gems crack as they decay), dark (an opaque void — gems hidden, the
+   "where's it coming from" mystery). Plus a placement overlay (dots + ghost).
    ===================================================================== */
-export function drawClimb(ctx, state, rules, layout, camTop) {
+export function drawClimb(ctx, state, rules, layout, overlay) {
   const { cell, ox, oy } = layout;
-  const view = rules.view;
+  const cols = rules.cols, rows = rules.rows;
   const cxp = (x) => ox + x * cell;
-  const ryp = (y) => oy + (y - camTop) * cell; // world row -> screen y
+  const ryp = (y) => oy + y * cell;
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
+  // per-column light heights
+  const bc = [], dc = [];
+  for (let x = 0; x < cols; x++) { bc[x] = brightCeiling(state, x); dc[x] = dimCeiling(state, x); }
+
   // frame
-  ctx.fillStyle = '#00000035';
-  ctx.fillRect(ox - 4, oy - 4, cell * rules.cols + 8, cell * view + 8);
+  ctx.fillStyle = '#00000040';
+  ctx.fillRect(ox - 4, oy - 4, cell * cols + 8, cell * rows + 8);
 
-  // light band (full width up to the lens-raised ceiling; base band reads brighter)
-  const ceil = climbLightCeiling(state);
-  const base = rules.rows - rules.baseReach;
-  for (let sy = 0; sy < view; sy++) {
-    const y = camTop + sy;
-    if (y < 0 || y >= rules.rows || y < ceil) continue;
-    ctx.fillStyle = hexA(LIGHTC, y >= base ? 0.16 : 0.10);
-    ctx.fillRect(cxp(0), ryp(y), cell * rules.cols, cell);
+  // bright + dim bands, per column
+  for (let x = 0; x < cols; x++) {
+    if (bc[x] <= rows - 1) {
+      const g = ctx.createLinearGradient(0, ryp(bc[x]), 0, ryp(rows));
+      g.addColorStop(0, hexA(LIGHTC, 0.10)); g.addColorStop(1, hexA(LIGHTC, 0.22));
+      ctx.fillStyle = g; ctx.fillRect(cxp(x), ryp(bc[x]), cell, (rows - bc[x]) * cell);
+    }
+    if (dc[x] < bc[x]) { ctx.fillStyle = hexA('#7c8fd0', 0.07); ctx.fillRect(cxp(x), ryp(dc[x]), cell, (bc[x] - dc[x]) * cell); }
   }
 
-  // faint grid
+  // faint grid (covered by the dark veil where it's dark)
   ctx.strokeStyle = '#ffffff0c'; ctx.lineWidth = 1;
-  for (let x = 0; x <= rules.cols; x++) { ctx.beginPath(); ctx.moveTo(cxp(x), oy); ctx.lineTo(cxp(x), oy + cell * view); ctx.stroke(); }
-  for (let sy = 0; sy <= view; sy++) { ctx.beginPath(); ctx.moveTo(ox, oy + sy * cell); ctx.lineTo(ox + cell * rules.cols, oy + sy * cell); ctx.stroke(); }
+  for (let x = 0; x <= cols; x++) { ctx.beginPath(); ctx.moveTo(cxp(x), oy); ctx.lineTo(cxp(x), oy + cell * rows); ctx.stroke(); }
+  for (let y = 0; y <= rows; y++) { ctx.beginPath(); ctx.moveTo(ox, oy + y * cell); ctx.lineTo(ox + cell * cols, oy + y * cell); ctx.stroke(); }
 
-  // Glitterdelve floor (if the bottom is in view)
-  if (rules.rows - 1 >= camTop && rules.rows - 1 < camTop + view) {
-    const fy = ryp(rules.rows - 1);
-    ctx.fillStyle = '#e8c14a'; ctx.fillRect(ox - 4, fy + cell - 3, cell * rules.cols + 8, 6);
+  // dark veil per column (opaque void above the dim frontier)
+  for (let x = 0; x < cols; x++) {
+    if (dc[x] <= 0) continue;
+    const g = ctx.createLinearGradient(0, ryp(0), 0, ryp(dc[x]));
+    g.addColorStop(0, hexA('#0b0814', 0.97)); g.addColorStop(1, hexA('#0b0814', 0.82));
+    ctx.fillStyle = g; ctx.fillRect(cxp(x), ryp(0), cell, dc[x] * cell);
   }
-  // The Source (if the top is in view) — glows pink when revealed (won)
-  if (camTop <= 0) {
-    ctx.fillStyle = state.won ? '#ff6b9d' : '#3a2a52';
-    ctx.fillRect(ox - 4, ryp(0) - 12, cell * rules.cols + 8, 10);
+  // bright-frontier accent line per column (your safe line)
+  ctx.lineWidth = Math.max(1, cell * 0.04); ctx.lineCap = 'round';
+  for (let x = 0; x < cols; x++) {
+    if (bc[x] <= 0 || bc[x] >= rows) continue;
+    ctx.strokeStyle = hexA(LIGHTC, 0.5);
+    ctx.beginPath(); ctx.moveTo(cxp(x) + 2, ryp(bc[x])); ctx.lineTo(cxp(x) + cell - 2, ryp(bc[x])); ctx.stroke();
   }
 
-  // gems: full alpha when lit, dimmed when dark, faint when about to break
-  for (let sy = 0; sy < view; sy++) {
-    const y = camTop + sy;
-    if (y < 0 || y >= rules.rows) continue;
-    for (let x = 0; x < rules.cols; x++) {
+  // Glitterdelve floor
+  ctx.fillStyle = '#e8c14a'; ctx.fillRect(ox - 4, ryp(rows - 1) + cell - 3, cell * cols + 8, 6);
+  // The Source (top) — a faint glimmer, blazing pink when reached (won)
+  const sg = ctx.createLinearGradient(0, oy - 14, 0, oy + 6);
+  sg.addColorStop(0, state.won ? '#ff6b9d' : hexA('#caa6ff', 0.55)); sg.addColorStop(1, 'transparent');
+  ctx.fillStyle = sg; ctx.fillRect(ox - 4, oy - 14, cell * cols + 8, 20);
+
+  // gems — dark cells are invisible; bright gems glow; dim gems crack as they decay
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
       const c = state.grid[y][x];
-      if (c === EMPTY) continue;
-      const lit = climbIsLit(state, x, y);
-      const dying = state.life[y][x] <= 1;
-      ctx.globalAlpha = dying ? 0.3 : (lit ? 1 : 0.5);
-      drawGem(ctx, cxp(x), ryp(y), cell, c, cell >= 18);
-      ctx.globalAlpha = 1;
+      if (c === EMPTY || y < dc[x]) continue; // dark = hidden
+      const sx = cxp(x), sy = ryp(y);
+      if (y >= bc[x]) { // bright / prime
+        ctx.save();
+        ctx.shadowColor = hexA(COLORS[c % COLORS.length], 0.95); ctx.shadowBlur = cell * 0.45;
+        drawGem(ctx, sx, sy, cell, c, cell >= 16);
+        ctx.restore();
+      } else { // dim / at risk
+        ctx.globalAlpha = 0.8; drawGem(ctx, sx, sy, cell, c, cell >= 16); ctx.globalAlpha = 1;
+        const st = crackStage(state, x, y);
+        if (st > 0) drawCracks(ctx, sx, sy, cell, st);
+      }
     }
   }
 
-  drawClimbPieces(ctx, state, rules, layout, camTop);
+  drawClimbPieces(ctx, state, rules, layout);
+  if (overlay && overlay.tool) drawClimbOverlay(ctx, state, rules, layout, overlay, bc, dc);
 }
 
-function drawClimbPieces(ctx, state, rules, layout, camTop) {
-  const { cell, ox } = layout;
-  const cxp = (x) => ox + x * cell;
-  const ryp = (y) => layout.oy + (y - camTop) * cell;
+/* Jagged dark fractures over a decaying gem; a red rim once it's near shatter. */
+function drawCracks(ctx, sx, sy, cell, st) {
+  const cx = sx + cell / 2, cy = sy + cell / 2, r = cell * 0.34;
+  ctx.strokeStyle = `rgba(8,5,12,${0.35 + 0.5 * st})`; ctx.lineWidth = Math.max(1, cell * 0.045); ctx.lineJoin = 'round';
+  const ang = [-0.4, 1.9, 3.4];
+  for (let i = 0; i < ang.length; i++) {
+    const a = ang[i];
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.55, cy + Math.sin(a) * r * 0.55);
+    ctx.lineTo(cx + Math.cos(a + 0.5) * r, cy + Math.sin(a + 0.5) * r);
+    ctx.stroke();
+  }
+  if (st > 0.5) {
+    ctx.strokeStyle = `rgba(255,96,96,${(st - 0.5) * 1.4})`; ctx.lineWidth = Math.max(1.5, cell * 0.06);
+    rr(ctx, sx + cell * 0.14, sy + cell * 0.14, cell * 0.72, cell * 0.72, cell * 0.18); ctx.stroke();
+  }
+}
+
+function drawClimbPieces(ctx, state, rules, layout) {
+  const { cell, ox, oy } = layout;
+  const cxp = (x) => ox + x * cell, ryp = (y) => oy + y * cell;
   const get = (id) => state.pieces.get(id) || new Map();
-  const inView = (y) => y >= camTop && y < camTop + rules.view + 1;
 
   // Walls (horizontal seam)
   for (const key of get('dam').keys()) {
     const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
-    if (!inView(y)) continue;
-    ctx.strokeStyle = DAMC; ctx.lineWidth = Math.max(2, cell * 0.09); ctx.lineCap = 'round';
+    ctx.strokeStyle = DAMC; ctx.lineWidth = Math.max(2, cell * 0.11); ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y)); ctx.lineTo(cxp(x) + cell - 3, ryp(y)); ctx.stroke();
   }
-  // Lenses (double bar; drawn dashed-ish to read as fragile)
+  // Lenses (dashed double bar — reads as fragile)
   for (const key of get('amp').keys()) {
     const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
-    if (!inView(y)) continue;
-    ctx.strokeStyle = AMPC; ctx.lineWidth = Math.max(1.5, cell * 0.06); ctx.lineCap = 'butt';
-    ctx.setLineDash([Math.max(3, cell * 0.14), Math.max(2, cell * 0.08)]);
+    ctx.save();
+    ctx.shadowColor = hexA(AMPC, 0.8); ctx.shadowBlur = cell * 0.3;
+    ctx.strokeStyle = AMPC; ctx.lineWidth = Math.max(1.5, cell * 0.07); ctx.lineCap = 'butt';
+    ctx.setLineDash([Math.max(3, cell * 0.16), Math.max(2, cell * 0.09)]);
     ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y) - 2); ctx.lineTo(cxp(x) + cell - 3, ryp(y) - 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cxp(x) + 3, ryp(y) + 2); ctx.lineTo(cxp(x) + cell - 3, ryp(y) + 2); ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.restore();
   }
-  // Swappers (vertical seam)
-  for (const key of get('swap').keys()) {
+  // Ramps (solid wedge sloping toward the push direction)
+  for (const [key, p] of get('ramp')) {
     const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
-    if (!inView(y)) continue;
-    ctx.strokeStyle = SWAPC; ctx.lineWidth = Math.max(2, cell * 0.09); ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cxp(x), ryp(y) + 3); ctx.lineTo(cxp(x), ryp(y) + cell - 3); ctx.stroke();
+    drawWedge(ctx, cxp(x), ryp(y), cell, (p && p.dir) || 1, RAMPC);
   }
-  // Splitters (downward fork chevron in a cell)
-  for (const [key, p] of get('split')) {
+  // Sorters (a colour funnel: target colour drops through, the rest kicked aside)
+  for (const [key, p] of get('sorter')) {
     const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
-    if (!inView(y)) continue;
-    const m = cell / 2, dir = p && p.dir ? p.dir : 1;
-    ctx.strokeStyle = SPLITC; ctx.lineWidth = Math.max(2, cell * 0.07); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cxp(x) + m, ryp(y) + cell * 0.18);
-    ctx.lineTo(cxp(x) + m, ryp(y) + cell * 0.55);
-    ctx.lineTo(cxp(x) + m + dir * cell * 0.28, ryp(y) + cell * 0.82);
-    ctx.moveTo(cxp(x) + m, ryp(y) + cell * 0.55);
-    ctx.lineTo(cxp(x) + m, ryp(y) + cell * 0.82);
-    ctx.stroke();
+    const dir = (p && p.dir) || 1, tc = (p && p.tc) | 0;
+    drawSorter(ctx, cxp(x), ryp(y), cell, dir, tc);
   }
-  // Slopes (a solid ramp triangle pointing the push direction)
-  for (const [key, p] of get('slope')) {
+  // Conveyors (a belt of chevrons pointing the carry direction)
+  for (const [key, p] of get('conveyor')) {
     const ci = key.indexOf(','); const x = +key.slice(0, ci), y = +key.slice(ci + 1);
-    if (!inView(y)) continue;
-    const dir = p && p.dir ? p.dir : 1;
-    const x0 = cxp(x) + cell * 0.15, x1 = cxp(x) + cell * 0.85, yb = ryp(y) + cell * 0.8, yt = ryp(y) + cell * 0.25;
-    ctx.fillStyle = hexA(SLOPEC, 0.85);
-    ctx.beginPath();
-    if (dir > 0) { ctx.moveTo(x0, yb); ctx.lineTo(x1, yb); ctx.lineTo(x1, yt); }
-    else { ctx.moveTo(x1, yb); ctx.lineTo(x0, yb); ctx.lineTo(x0, yt); }
-    ctx.closePath(); ctx.fill();
+    const dir = (p && p.dir) || 1;
+    ctx.strokeStyle = CONVC; ctx.lineWidth = Math.max(1.5, cell * 0.06); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const yb = ryp(y) + cell - 4;
+    ctx.fillStyle = hexA(CONVC, 0.16); ctx.fillRect(cxp(x) + 2, yb - 4, cell - 4, 6);
+    for (let i = 0; i < 3; i++) {
+      const bx = cxp(x) + cell * (0.3 + i * 0.2);
+      ctx.beginPath();
+      ctx.moveTo(bx - dir * cell * 0.06, yb - cell * 0.12);
+      ctx.lineTo(bx + dir * cell * 0.06, yb - cell * 0.06);
+      ctx.lineTo(bx - dir * cell * 0.06, yb); ctx.stroke();
+    }
+  }
+}
+
+/* a colour funnel: a V that drops the target colour straight down, with a small
+   arrow showing where other colours are kicked */
+function drawSorter(ctx, sx, sy, cell, dir, tc) {
+  const m = sx + cell / 2;
+  ctx.strokeStyle = SORTERC; ctx.lineWidth = Math.max(1.5, cell * 0.07); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath(); // funnel walls
+  ctx.moveTo(sx + cell * 0.16, sy + cell * 0.2); ctx.lineTo(m - cell * 0.1, sy + cell * 0.62);
+  ctx.moveTo(sx + cell * 0.84, sy + cell * 0.2); ctx.lineTo(m + cell * 0.1, sy + cell * 0.62);
+  ctx.stroke();
+  // target-colour core falling through the throat
+  ctx.fillStyle = COLORS[tc % COLORS.length];
+  ctx.beginPath(); ctx.arc(m, sy + cell * 0.74, Math.max(2.5, cell * 0.12), 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = hexA('#ffffff', 0.55); ctx.lineWidth = 1; ctx.stroke();
+  // reject arrow
+  ctx.strokeStyle = hexA(SORTERC, 0.8); ctx.lineWidth = Math.max(1, cell * 0.05);
+  const ax = m + dir * cell * 0.34, ay = sy + cell * 0.34;
+  ctx.beginPath(); ctx.moveTo(m + dir * cell * 0.18, ay); ctx.lineTo(ax, ay);
+  ctx.moveTo(ax, ay); ctx.lineTo(ax - dir * cell * 0.08, ay - cell * 0.06);
+  ctx.moveTo(ax, ay); ctx.lineTo(ax - dir * cell * 0.08, ay + cell * 0.06); ctx.stroke();
+}
+
+/* a filled right-triangle wedge: the vertical (high) face is on the push side */
+function drawWedge(ctx, sx, sy, cell, dir, color) {
+  const x0 = sx + cell * 0.12, x1 = sx + cell * 0.88, yb = sy + cell * 0.86, yt = sy + cell * 0.16;
+  ctx.fillStyle = hexA(color, 0.9);
+  ctx.beginPath();
+  if (dir > 0) { ctx.moveTo(x0, yb); ctx.lineTo(x1, yb); ctx.lineTo(x1, yt); }
+  else { ctx.moveTo(x1, yb); ctx.lineTo(x0, yb); ctx.lineTo(x0, yt); }
+  ctx.closePath(); ctx.fill();
+}
+
+/* Placement overlay: green dots/ticks on every legal spot for the selected tool
+   (only in the buildable, lit zone — so the dots ARE the build-zone signal), and
+   a ghost of the piece under the cursor. */
+function drawClimbOverlay(ctx, state, rules, layout, overlay, bc, dc) {
+  const { cell, ox, oy } = layout;
+  const cxp = (x) => ox + x * cell, ryp = (y) => oy + y * cell;
+  const cols = rules.cols, rows = rules.rows;
+  const t = rules.tools.find((tt) => tt.id === overlay.tool);
+  if (!t) return;
+  const DOT = hexA('#7ef0a8', 0.5);
+
+  if (t.kind === 'action') { // Bomb: ring the hovered gem
+    const h = overlay.hover;
+    if (h && h.kind === 'cell' && state.grid[h.y] && state.grid[h.y][h.x] !== EMPTY) {
+      ctx.strokeStyle = hexA('#ff6b6b', 0.85); ctx.lineWidth = Math.max(2, cell * 0.06);
+      rr(ctx, cxp(h.x) + 3, ryp(h.y) + 3, cell - 6, cell - 6, 6); ctx.stroke();
+    }
+    return;
+  }
+
+  if (t.extendsLight) { // Lens — one rung per column, at its bright edge
+    for (let x = 0; x < cols; x++) {
+      if (bc[x] < 1) continue;             // column already reaches the Source
+      const y = bc[x];
+      ctx.fillStyle = hexA(AMPC, 0.7);
+      ctx.beginPath(); ctx.arc(cxp(x) + cell * 0.5, ryp(y), Math.max(2, cell * 0.08), 0, Math.PI * 2); ctx.fill();
+    }
+    const h = overlay.hover;
+    if (h && h.kind === 'seam' && bc[h.x] >= 1) {
+      ctx.strokeStyle = hexA(AMPC, 0.9); ctx.lineWidth = Math.max(2, cell * 0.1); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cxp(h.x) + 3, ryp(bc[h.x])); ctx.lineTo(cxp(h.x) + cell - 3, ryp(bc[h.x])); ctx.stroke();
+    }
+    return;
+  }
+  if (t.seam === 'horizontal') { // Wall — ticks on buildable seams
+    for (let x = 0; x < cols; x++)
+      for (let y = 1; y < rows; y++) {
+        if (y < dc[x]) continue; // dark
+        ctx.fillStyle = DOT; ctx.fillRect(cxp(x) + cell * 0.5 - 1.5, ryp(y) - 1.5, 3, 3);
+      }
+    const h = overlay.hover;
+    if (h && h.kind === 'seam' && h.y >= 1 && h.y < rows && h.y >= dc[h.x]) {
+      ctx.strokeStyle = hexA(DAMC, 0.85); ctx.lineWidth = Math.max(2, cell * 0.1); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cxp(h.x) + 3, ryp(h.y)); ctx.lineTo(cxp(h.x) + cell - 3, ryp(h.y)); ctx.stroke();
+    }
+    return;
+  }
+
+  // cell pieces (ramp / sorter / conveyor) — dots on buildable empty cells
+  for (let x = 0; x < cols; x++)
+    for (let y = 0; y < rows; y++) {
+      if (y < dc[x]) continue;
+      if (state.grid[y][x] !== EMPTY) continue;
+      ctx.fillStyle = DOT;
+      ctx.beginPath(); ctx.arc(cxp(x) + cell / 2, ryp(y) + cell / 2, Math.max(1.5, cell * 0.06), 0, Math.PI * 2); ctx.fill();
+    }
+  const h = overlay.hover;
+  if (h && h.kind === 'cell' && h.x >= 0 && h.x < cols && h.y >= 0 && h.y < rows && h.y >= dc[h.x] && state.grid[h.y][h.x] === EMPTY) {
+    ctx.globalAlpha = 0.55;
+    if (t.id === 'conveyor') { ctx.fillStyle = hexA(CONVC, 0.4); ctx.fillRect(cxp(h.x) + 2, ryp(h.y) + cell - 8, cell - 4, 6); }
+    else if (t.id === 'sorter') drawSorter(ctx, cxp(h.x), ryp(h.y), cell, overlay.dir || 1, 0);
+    else drawWedge(ctx, cxp(h.x), ryp(h.y), cell, overlay.dir || 1, RAMPC);
+    ctx.globalAlpha = 1;
   }
 }
 
