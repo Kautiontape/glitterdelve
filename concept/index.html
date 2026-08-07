@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maxwell's Delve — concept</title>
+<style>
+  :root{
+    --bg:#0b0913; --rock:#0d0b16; --panel:#171327; --line:#2a2342; --ink:#ece8fb; --muted:#8b83ad; --accent:#ffcf4d;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;min-height:100vh;background:radial-gradient(1200px 800px at 50% -10%, #1a1430 0%, var(--bg) 60%);
+    color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    display:flex;justify-content:center;padding:20px;}
+  .app{display:flex;gap:18px;align-items:flex-start;max-width:1000px;width:100%;}
+  h1{font-size:18px;margin:0 0 2px;letter-spacing:-.01em;}
+  .sub{font-size:12px;color:var(--muted);margin-bottom:14px;max-width:520px;line-height:1.5;}
+  .stage{flex:1;}
+  .hud{display:flex;gap:10px;margin-bottom:12px;}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 14px;}
+  .stat .n{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;}
+  .stat .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+  .rock{background:linear-gradient(#0d0b16,#120e20);border:1px solid var(--line);border-bottom:none;
+    border-radius:12px 12px 0 0;padding:10px 12px;display:flex;align-items:center;gap:10px;}
+  .rock .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;}
+  .queue{display:flex;gap:7px;align-items:center;}
+  .chip{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
+  .chip.dark{background:#1c1730;color:#3c3458;border:1px dashed #312a4d;}
+  .chip.next{box-shadow:0 0 0 2px #ffffff22, 0 0 14px var(--gemglow);transform:scale(1.12);}
+  .waiting .chip.next{animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 2px #ffffff22,0 0 12px var(--gemglow);}50%{box-shadow:0 0 0 3px #ffffff66,0 0 22px var(--gemglow);}}
+  .board{display:grid;gap:5px;background:var(--rock);border:1px solid var(--line);border-radius:0 0 12px 12px;
+    padding:8px;cursor:pointer;}
+  .cell{aspect-ratio:1;border-radius:8px;background:#140f24;display:flex;align-items:center;justify-content:center;transition:background .12s;}
+  .cell:hover{background:#1a1430;}
+  .gem{width:84%;height:84%;border-radius:9px;position:relative;}
+  .gem::after{content:"";position:absolute;left:16%;top:16%;width:26%;height:26%;background:rgba(255,255,255,.4);border-radius:5px;}
+  .flash{animation:flash .35s;}
+  @keyframes flash{0%{filter:brightness(2.4);transform:scale(1.12);}100%{filter:none;transform:none;}}
+  .side{width:266px;flex-shrink:0;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;}
+  .card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);}
+  .steps{font-size:13px;line-height:1.55;}
+  .steps b{color:var(--accent);}
+  .legend .rule{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0;}
+  .legend .none{font-size:12px;color:var(--muted);}
+  .prompt{background:linear-gradient(#231a3a,#1c1530);border:1px solid #4a3a6e;border-radius:14px;padding:14px;margin-bottom:12px;display:none;}
+  .prompt.show{display:block;animation:rise .3s;}
+  @keyframes rise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  .prompt p{margin:0 0 10px;font-size:13px;line-height:1.45;}
+  .prompt button{width:100%;background:var(--accent);color:#241800;border:none;border-radius:9px;padding:9px;font-weight:700;cursor:pointer;}
+  .prompt button:disabled{opacity:.45;cursor:not-allowed;}
+  .hint{font-size:12px;color:var(--muted);min-height:18px;margin-top:8px;}
+  .mini{width:15px;height:15px;border-radius:5px;display:inline-block;vertical-align:middle;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <h1>Maxwell's Delve <span style="color:var(--muted);font-weight:400;">— concept</span></h1>
+    <div class="sub">You're not playing the matcher — you're <b>building</b> it. Sort the stream by hand; when you catch yourself repeating a move, codify it into a machine. Automate every colour and the delve sorts itself.</div>
+    <div class="hud">
+      <div class="stat"><div class="n" id="energy">0</div><div class="l">energy ⚡</div></div>
+      <div class="stat"><div class="n" id="cleared">0</div><div class="l">gems harvested</div></div>
+      <div class="stat"><div class="n" id="autos">0</div><div class="l">machines built</div></div>
+    </div>
+    <div class="rock" id="rock">
+      <span class="lbl">the rock&nbsp;→</span>
+      <div class="queue" id="queue"></div>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="hint" id="hint">Click a column to drop the lit gem into it. (The rock hides what's coming — only the next gem is in the light.)</div>
+  </div>
+  <div class="side">
+    <div class="prompt" id="prompt"><p id="promptText"></p><button id="promptBtn">Build it</button></div>
+    <div class="card">
+      <h3>The loop</h3>
+      <div class="steps">
+        <b>1 ·</b> You are Maxwell. Route each gem by hand — line up 3+ of a colour to harvest them for energy.<br><br>
+        <b>2 ·</b> Repeat a route enough and you can <b>codify it into a machine</b> with that energy.<br><br>
+        <b>3 ·</b> Machines route for you. Automate every colour → the delve runs itself and you just watch it purr.
+      </div>
+    </div>
+    <div class="card legend">
+      <h3>Machines — your codified rules</h3>
+      <div id="legend"><div class="none">None yet — you're doing it all by hand.</div></div>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const COLORS = ['#ff5d73','#39b8ff','#5be37a','#ffcf4d'];
+  const ICON = ['🔴','🔵','🟢','🟡'];
+  const COLS = 6, ROWS = 9, NC = COLORS.length, TICK = 1100, AUTO_THRESHOLD = 3, AUTO_COST = 10;
+
+  let s = 1234567;
+  const rng = () => { s ^= s<<13; s ^= s>>>17; s ^= s<<5; return ((s>>>0)%100000)/100000; };
+  const randColor = () => Math.floor(rng()*NC);
+
+  const grid = Array.from({length:ROWS}, () => Array(COLS).fill(null));
+  let energy = 0, cleared = 0;
+  let queue = [];
+  const rules = {};            // color -> col
+  const history = {};          // "color:col" -> count
+  let waiting = false;
+  let pendingSuggest = null;
+  let flashes = [];
+
+  const $ = id => document.getElementById(id);
+  const board = $('board');
+  board.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+  const cells = [];
+  for (let r=0;r<ROWS;r++){ cells.push([]); for(let c=0;c<COLS;c++){ const d=document.createElement('div'); d.className='cell'; d.dataset.col=c; board.appendChild(d); cells[r].push(d);} }
+  board.addEventListener('click', e => { const cell=e.target.closest('.cell'); if(cell) manualPlace(+cell.dataset.col); });
+
+  const refillQueue = () => { while(queue.length<7) queue.push(randColor()); };
+  const lowestEmpty = col => { for(let r=ROWS-1;r>=0;r--) if(grid[r][col]===null) return r; return -1; };
+
+  function placeGem(col,color){
+    const r = lowestEmpty(col);
+    if(r<0){ flashHint('That column is full — gem flows on past, lost to the dark (no penalty).'); return false; }
+    grid[r][col]=color; resolve(); return true;
+  }
+  function findMatches(){
+    const hit=new Set();
+    for(let r=0;r<ROWS;r++){ let run=1; for(let c=1;c<=COLS;c++){ if(c<COLS && grid[r][c]!==null && grid[r][c]===grid[r][c-1]) run++; else { if(run>=3) for(let k=c-run;k<c;k++) hit.add(r+','+k); run=1; } } }
+    for(let c=0;c<COLS;c++){ let run=1; for(let r=1;r<=ROWS;r++){ if(r<ROWS && grid[r][c]!==null && grid[r][c]===grid[r-1][c]) run++; else { if(run>=3) for(let k=r-run;k<r;k++) hit.add(k+','+c); run=1; } } }
+    return hit;
+  }
+  const gravity = () => { for(let c=0;c<COLS;c++){ let w=ROWS-1; for(let r=ROWS-1;r>=0;r--){ if(grid[r][c]!==null){ const v=grid[r][c]; grid[r][c]=null; grid[w][c]=v; w--; } } } };
+  function resolve(){
+    let depth=0;
+    while(true){ const hit=findMatches(); if(hit.size===0) break; depth++;
+      for(const k of hit){ const [r,c]=k.split(',').map(Number); grid[r][c]=null; flashes.push(r+','+c); }
+      energy += hit.size*5*depth; cleared += hit.size; gravity();
+    }
+    render();
+  }
+  function manualPlace(col){
+    if(queue.length===0) return;
+    const color=queue[0];
+    if(!placeGem(col,color)) return;
+    queue.shift(); refillQueue(); waiting=false;
+    const key=color+':'+col; history[key]=(history[key]||0)+1;
+    if(rules[color]==null && history[key]>=AUTO_THRESHOLD){ pendingSuggest={color,col}; showPrompt(); }
+    render();
+  }
+  function showPrompt(){
+    if(!pendingSuggest){ $('prompt').classList.remove('show'); return; }
+    const {color,col}=pendingSuggest;
+    $('promptText').innerHTML = `You keep sending <span class="mini" style="background:${COLORS[color]}"></span> to <b>column ${col+1}</b>. Codify that into a machine?`;
+    const btn=$('promptBtn'); btn.textContent=`Build Sorter — ${AUTO_COST}⚡`; btn.disabled=energy<AUTO_COST;
+    $('prompt').classList.add('show');
+  }
+  $('promptBtn').addEventListener('click',()=>{
+    if(!pendingSuggest || energy<AUTO_COST) return;
+    const {color,col}=pendingSuggest;
+    energy-=AUTO_COST; rules[color]=col; pendingSuggest=null;
+    $('prompt').classList.remove('show');
+    flashHint(`Machine built: ${ICON[color]} now routes to column ${col+1} on its own. Your hands are free.`);
+    render();
+  });
+  function tick(){
+    refillQueue();
+    const color=queue[0];
+    if(rules[color]!=null){
+      let col=rules[color];
+      if(lowestEmpty(col)<0){ col=-1; for(let c=0;c<COLS;c++) if(lowestEmpty(c)>=0){col=c;break;} }
+      if(col>=0){ placeGem(col,color); queue.shift(); refillQueue(); }
+      waiting=false;
+    } else { waiting=true; }
+    render();
+  }
+  const flashHint = t => { $('hint').textContent=t; };
+  function render(){
+    $('energy').textContent=energy; $('cleared').textContent=cleared; $('autos').textContent=Object.keys(rules).length;
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){ const cell=cells[r][c], v=grid[r][c]; cell.innerHTML='';
+      if(v!==null){ const g=document.createElement('div'); g.className='gem'; g.style.background=COLORS[v];
+        g.style.boxShadow=`0 0 10px ${COLORS[v]}aa, inset 0 0 6px #ffffff30`;
+        if(flashes.includes(r+','+c)) g.classList.add('flash'); cell.appendChild(g); } }
+    flashes=[];
+    const q=$('queue'); q.innerHTML='';
+    for(let i=0;i<queue.length;i++){ const chip=document.createElement('div');
+      if(i===0){ chip.className='chip next'; chip.style.background=COLORS[queue[0]]; chip.style.setProperty('--gemglow',COLORS[queue[0]]+'cc'); }
+      else { chip.className='chip dark'; chip.textContent='?'; }
+      q.appendChild(chip); }
+    $('rock').classList.toggle('waiting',waiting);
+    const leg=$('legend'), ks=Object.keys(rules);
+    leg.innerHTML = ks.length===0 ? '<div class="none">None yet — you\'re doing it all by hand.</div>'
+      : ks.map(c=>`<div class="rule"><span class="mini" style="background:${COLORS[c]}"></span> ${ICON[c]} → column ${rules[c]+1}</div>`).join('');
+    if(pendingSuggest) $('promptBtn').disabled = energy<AUTO_COST;
+  }
+  window.__demo = { place:manualPlace, tick, state:()=>({energy,cleared,rules:{...rules},queue:[...queue]}), suggest:()=>pendingSuggest, buildSorter:()=>$('promptBtn').click() };
+  refillQueue(); render();
+  setInterval(tick, TICK);
+})();
+</script>
+</body>
+</html>
