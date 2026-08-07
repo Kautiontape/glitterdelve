@@ -1,0 +1,5 @@
+# Playwright MCP scratch output (console logs, page snapshots) — regenerated per run.
+.playwright-mcp/
+
+# Node — the sim is dependency-free, but keep stray installs out of the deploy tree.
+node_modules/
